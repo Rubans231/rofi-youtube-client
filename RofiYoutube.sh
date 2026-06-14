@@ -1,5 +1,20 @@
 #!/usr/bin/env bash
 
+# ==============================================================================
+# ATOMIC CONCURRENCY LOCK ENGINE (Anti-Spam Shield)
+# ==============================================================================
+LOCKFILE="/tmp/rofi_youtube.lock"
+if [ -f "$LOCKFILE" ]; then
+  OLD_PID=$(cat "$LOCKFILE" 2>/dev/null)
+  if [ -n "$OLD_PID" ] && kill -0 "$OLD_PID" 2>/dev/null; then
+    pkill -f "yt-dlp.*ytsearch" 2>/dev/null
+    pkill rofi 2>/dev/null
+    kill "$OLD_PID" 2>/dev/null
+  fi
+fi
+echo $$ >"$LOCKFILE"
+trap 'rm -f "$LOCKFILE"' EXIT
+
 # Storage layout targets
 HISTORY_DIR="$HOME/.cache/ytfzf"
 PLAYLIST_HIST="$HISTORY_DIR/playlist_history.txt"
@@ -17,6 +32,10 @@ touch "$PLAYLIST_HIST" "$SEARCHED_HIST" "$ALL_PLAYED_HIST" "$LIKED_HIST"
 
 # Core Navigation Array: Disables default char-stepping to map Left and Right arrows globally
 ROFI_NAV=(rofi -dmenu -no-show-icons -kb-move-char-back "" -kb-move-char-forward "" -kb-custom-1 Left -kb-custom-2 Right)
+
+# EXACT COMMAND TARGETS: Universal Identity Variables
+COOKIE_PATH="$HOME/.config/yt-dlp/youtube-cookies.txt"
+BROWSER_UA="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, Gecko) Chrome/120.0.0.0 Safari/537.36"
 
 # ==============================================================================
 # Helper Engines: M3U Compiler, Asynchronous Logger, & Terminal Spawner
@@ -40,7 +59,8 @@ log_video_history() {
   esac
   local video_title="$custom_title"
   if [ -z "$video_title" ]; then
-    video_title=$(yt-dlp --print "%(title)s" --no-warnings "$video_url" 2>/dev/null | head -n 1)
+    # FIXED: Added cookie and user-agent string authentication right here
+    video_title=$(yt-dlp --cookies "$COOKIE_PATH" --user-agent "$BROWSER_UA" --print "%(title)s" --no-warnings "$video_url" 2>/dev/null | head -n 1)
     [ -z "$video_title" ] && video_title="Video Track (${video_url##*=})"
   fi
   local entry="$video_title ➔ $video_url"
@@ -97,7 +117,7 @@ while true; do
   if [ $? -eq 10 ] || [ -z "$main_choice" ]; then exit 0; fi
 
   # ----------------------------------------------------------------------------
-  # PATH A: Direct Bulletproof yt-dlp Search Pipeline (No Links / Left-Aligned)
+  # PATH A: Direct Bulletproof yt-dlp Search Pipeline (Personalized & Aligned)
   # ----------------------------------------------------------------------------
   if [[ "$main_choice" == *"Search YouTube"* ]]; then
     query=$("${ROFI_NAV[@]}" -p "YouTube Search" -theme-str 'entry { placeholder: "Type search query (Left Arrow goes Back)..."; }')
@@ -105,7 +125,8 @@ while true; do
 
     notify-send "Search Engine" "Querying YouTube securely..." -i notification-audio-play
 
-    search_results=$(yt-dlp "ytsearch20:$query" --cookies "$HOME/.config/yt-dlp/youtube-cookies.txt" --flat-playlist --print "%(title)s ➔ https://youtube.com/watch?v=%(id)s" --no-warnings 2>/dev/null)
+    # LOCKED: Secure cookie verification handshake
+    search_results=$(yt-dlp "ytsearch20:$query" --user-agent "$BROWSER_UA" --cookies "$COOKIE_PATH" --flat-playlist --print "%(title)s ➔ https://youtube.com/watch?v=%(id)s" --no-warnings 2>/dev/null)
     if [ -z "$search_results" ]; then
       notify-send "Search Error" "YouTube rejected scraping or no results found." -i notification-message-im
       continue
@@ -133,7 +154,8 @@ while true; do
       continue
     elif [[ "$choice" == *"Download Video"* ]]; then
       notify-send "Downloader" "Starting background download to ~/Downloads..." -i notification-audio-play
-      yt-dlp -P "~/Downloads" "$url" &
+      # FIXED: Passed identity cookies to background downloader block
+      yt-dlp --user-agent "$BROWSER_UA" --cookies "$COOKIE_PATH" -P "~/Downloads" "$url" &
       continue
     fi
     log_video_history "search" "$url" "$title_extracted" &
@@ -276,7 +298,7 @@ while true; do
     fi
 
   # ----------------------------------------------------------------------------
-  # PATH D: Playlist Config & Neovim Editor Core (Video Switch Added)
+  # PATH D: Playlist Config & Neovim Editor Core
   # ----------------------------------------------------------------------------
   elif [[ "$main_choice" == *"Playlist Config"* ]]; then
     autoplay_status=$(cat "$AUTOPLAY_FILE")
@@ -290,7 +312,6 @@ while true; do
       [ "$autoplay_status" == "yes" ] && echo "no" >"$AUTOPLAY_FILE" || echo "yes" >"$AUTOPLAY_FILE"
       continue
     elif [[ "$config_choice" == *"Toggle Video Output"* ]]; then
-      # Shifts application between rendering full visuals or forcing pure audio execution
       [ "$video_mode_status" == "video" ] && echo "audio" >"$VIDEO_MODE_FILE" || echo "video" >"$VIDEO_MODE_FILE"
       continue
     elif [[ "$config_choice" == *"Edit Liked Videos"* ]]; then
@@ -316,7 +337,7 @@ while true; do
   fi
 
   # ----------------------------------------------------------------------------
-  # Unified Text File Actions Step (Links Hidden & Punctuation Standardized)
+  # Unified Text File Actions Step (Punctuation Standardized)
   # ----------------------------------------------------------------------------
   if [ -n "$active_file" ]; then
     while true; do
@@ -374,7 +395,8 @@ while true; do
         continue
       elif [[ "$choice" == *"Download Video"* ]]; then
         notify-send "Downloader" "Starting background download to ~/Downloads..." -i notification-audio-play
-        yt-dlp -P "~/Downloads" "$url" &
+        # FIXED: Hooked authentication configs to the second downloader block
+        yt-dlp --user-agent "$BROWSER_UA" --cookies "$COOKIE_PATH" -P "~/Downloads" "$url" &
         continue
       fi
       log_video_history "all" "$url" "$title_part" &
@@ -392,13 +414,16 @@ while true; do
       kill -0 "${sock##*-}" 2>/dev/null && sockets+=("$sock") || rm -f "$sock"
     done
 
-    # Intercept current config file selection to compile dynamic MPV window tokens
     mpv_video_flag=""
     [ "$(cat "$VIDEO_MODE_FILE")" == "audio" ] && mpv_video_flag="--no-video"
 
+    # CRITICAL INJECTION: Binds the User-Agent directly to MPV's backend connection plugins
+    # This prevents the stream from dropping out or running unauthenticated
+    MPV_UA_OPT="--user-agent=$BROWSER_UA"
+
     if [ ${#sockets[@]} -eq 0 ] && [[ "$choice" == *"Append"* || "$choice" == *"Play Next"* || "$choice" == *"Replace"* ]]; then
       notify-send "YouTube Error" "No active session found! Opening separately." -i notification-message-im
-      mpv $mpv_video_flag "$url" &
+      bash -c 'exec mpv --input-ipc-server="/tmp/mpvsocket-$$" "$@"' _ "$MPV_UA_OPT" $mpv_video_flag "$url" &
       exit 0
     elif [ ${#sockets[@]} -eq 1 ]; then
       target_socket="${sockets[0]}"
@@ -424,7 +449,7 @@ while true; do
     *"Play Selected Playlist Here"*)
       line_num=$(grep -n -F "$selected_video" "$active_file" | head -n1 | cut -d: -f1)
       compile_m3u "$active_file" "/tmp/rofi_mpv_playlist.m3u"
-      mpv $mpv_video_flag --script-opts="$autoplay_flag" --playlist-start=$((line_num - 1)) "/tmp/rofi_mpv_playlist.m3u" &
+      bash -c 'exec mpv --input-ipc-server="/tmp/mpvsocket-$$" "$@"' _ "$MPV_UA_OPT" $mpv_video_flag --script-opts="$autoplay_flag" --playlist-start=$((line_num - 1)) "/tmp/rofi_mpv_playlist.m3u" &
       notify-send "Playlist Player" "Loading local block playlist..." -i notification-audio-play
       ;;
     *"Play Playlist in Reverse"*)
@@ -432,16 +457,16 @@ while true; do
       total_lines=$(wc -l <"$active_file")
       tac "$active_file" >"/tmp/rofi_reversed.txt"
       compile_m3u "/tmp/rofi_reversed.txt" "/tmp/rofi_mpv_playlist.m3u"
-      mpv $mpv_video_flag --script-opts="$autoplay_flag" --playlist-start=$((total_lines - line_num)) "/tmp/rofi_mpv_playlist.m3u" &
+      bash -c 'exec mpv --input-ipc-server="/tmp/mpvsocket-$$" "$@"' _ "$MPV_UA_OPT" $mpv_video_flag --script-opts="$autoplay_flag" --playlist-start=$((total_lines - line_num)) "/tmp/rofi_mpv_playlist.m3u" &
       notify-send "Playlist Player" "Loading reversed local playlist..." -i notification-audio-play
       ;;
     *"Play Playlist Shuffled"*)
       compile_m3u "$active_file" "/tmp/rofi_mpv_playlist.m3u"
-      mpv $mpv_video_flag --script-opts="$autoplay_flag" --shuffle "/tmp/rofi_mpv_playlist.m3u" &
+      bash -c 'exec mpv --input-ipc-server="/tmp/mpvsocket-$$" "$@"' _ "$MPV_UA_OPT" $mpv_video_flag --script-opts="$autoplay_flag" --shuffle "/tmp/rofi_mpv_playlist.m3u" &
       notify-send "Playlist Player" "Loading randomized local playlist..." -i notification-audio-play
       ;;
     *"Play in New Window"*)
-      mpv $mpv_video_flag "$url" &
+      bash -c 'exec mpv --input-ipc-server="/tmp/mpvsocket-$$" "$@"' _ "$MPV_UA_OPT" $mpv_video_flag "$url" &
       notify-send "YouTube Player" "Opening track window instance" -i notification-audio-play
       ;;
     *"Append to Queue"*)
