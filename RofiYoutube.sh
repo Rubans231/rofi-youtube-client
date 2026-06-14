@@ -8,10 +8,12 @@ ALL_PLAYED_HIST="$HISTORY_DIR/all_played_history.txt"
 LIKED_HIST="$HISTORY_DIR/liked_history.txt"
 MANUAL_PL_DIR="$HISTORY_DIR/manual_playlists"
 AUTOPLAY_FILE="$HISTORY_DIR/autoplay_toggle.txt"
+VIDEO_MODE_FILE="$HISTORY_DIR/video_mode.txt"
 
 mkdir -p "$HISTORY_DIR" "$MANUAL_PL_DIR"
 touch "$PLAYLIST_HIST" "$SEARCHED_HIST" "$ALL_PLAYED_HIST" "$LIKED_HIST"
 [ -f "$AUTOPLAY_FILE" ] || echo "yes" >"$AUTOPLAY_FILE"
+[ -f "$VIDEO_MODE_FILE" ] || echo "video" >"$VIDEO_MODE_FILE"
 
 # Core Navigation Array: Disables default char-stepping to map Left and Right arrows globally
 ROFI_NAV=(rofi -dmenu -no-show-icons -kb-move-char-back "" -kb-move-char-forward "" -kb-custom-1 Left -kb-custom-2 Right)
@@ -24,7 +26,7 @@ compile_m3u() {
   echo "#EXTM3U" >"$out_m3u"
   while IFS= read -r line; do
     [ -z "$line" ] && continue
-    echo "#EXTINF:-1,$(echo "$line" | sed 's/ ➔ .*//' | sed 's/^📌 //')" >>"$out_m3u"
+    echo "#EXTINF:-1,$(echo "$line" | sed 's/ ➔ .*//' | sed 's/^\[PIN\] //')" >>"$out_m3u"
     echo "$line" | sed 's/.* ➔ //' >>"$out_m3u"
   done <"$src_file"
 }
@@ -55,11 +57,17 @@ add_to_manual_playlist() {
     notify-send "Playlist Error" "No manual playlists exist yet!" -i notification-message-im
     return 1
   fi
+
+  local pl_titles
+  pl_titles=$(basename -a "$MANUAL_PL_DIR"/* | sed 's/\.txt//' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+  local selected_index
+  selected_index=$(echo -e "$pl_titles" | "${ROFI_NAV[@]}" -format i -p "Choose Playlist" -theme-str 'entry { placeholder: "Select target manual playlist..."; }')
+  [ $? -eq 10 ] || [ -z "$selected_index" ] && return 1
+
   local pl_choice
-  pl_choice=$(basename -a "$MANUAL_PL_DIR"/* | sed 's/\.txt//' | "${ROFI_NAV[@]}" -p "📂 Choose Playlist" -theme-str 'entry { placeholder: "Select target manual playlist..."; }')
-  [ $? -eq 10 ] || [ -z "$pl_choice" ] && return 1
-  echo "$v_title ➔ $v_url" >>"$MANUAL_PL_DIR/$pl_choice.txt"
-  notify-send "Playlist Manager" "Added track to: $pl_choice" -i notification-audio-play
+  pl_choice=$(basename -a "$MANUAL_PL_DIR"/* | sed -n "$((selected_index + 1))p")
+  echo "$v_title ➔ $v_url" >>"$MANUAL_PL_DIR/$pl_choice"
+  notify-send "Playlist Manager" "Added track to: ${pl_choice%.txt}" -i notification-audio-play
 }
 
 open_in_nvim() {
@@ -77,7 +85,6 @@ open_in_nvim() {
 # Main Unified State Machine Loop
 # ==============================================================================
 while true; do
-  # Clear transient routing paths at the top of each loop state reset
   active_file=""
   placeholder=""
   is_liked=false
@@ -85,26 +92,37 @@ while true; do
   choice=""
   selected_video=""
 
-  main_options="󰎕 Search YouTube\n🎵 Playlist & Mix Manager\n📜 Video History Vault\n⚙️ Playlist Config"
-  main_choice=$(echo -e "$main_options" | "${ROFI_NAV[@]}" -p "󰚗 YouTube Menu" -theme-str 'entry { placeholder: "󰚗 Choose YouTube Mode..."; }')
+  main_options="Search YouTube\nPlaylist & Mix Manager\nVideo History Vault\nPlaylist Config"
+  main_choice=$(echo -e "$main_options" | "${ROFI_NAV[@]}" -p "YouTube Menu" -theme-str 'entry { placeholder: "Choose YouTube Mode..."; }')
   if [ $? -eq 10 ] || [ -z "$main_choice" ]; then exit 0; fi
 
   # ----------------------------------------------------------------------------
-  # PATH A: Standard YouTube Search
+  # PATH A: Direct Bulletproof yt-dlp Search Pipeline (No Links / Left-Aligned)
   # ----------------------------------------------------------------------------
   if [[ "$main_choice" == *"Search YouTube"* ]]; then
-    query=$("${ROFI_NAV[@]}" -p "󰎕 YouTube Search" -theme-str 'entry { placeholder: "󰎕 Type search query (Left Arrow goes Back)..."; }')
+    query=$("${ROFI_NAV[@]}" -p "YouTube Search" -theme-str 'entry { placeholder: "Type search query (Left Arrow goes Back)..."; }')
     if [ $? -eq 10 ] || [ -z "$query" ]; then continue; fi
 
-    url=$(YTFZF_EXTMENU="rofi -dmenu -i -no-show-icons -kb-move-char-back '' -kb-move-char-forward '' -kb-custom-1 Left -kb-custom-2 Right -theme-str 'entry { placeholder: \"󱎕 Select video track...\"; }'" ytfzf -D -L "$query")
-    if [ -z "$url" ]; then continue; fi
+    notify-send "Search Engine" "Querying YouTube securely..." -i notification-audio-play
 
-    options="󰐊 Play in New Window\n⏭️ Play Next (Queue)\n󰎕 Append to Queue\n󰓦 Replace Active Session\n❤️ Save to Liked Videos\n📂 Add to Manual Playlist\n📥 Download Video"
-    choice=$(echo -e "$options" | "${ROFI_NAV[@]}" -p "󰚗 Video Action" -theme-str 'entry { placeholder: "󰚗 Choose playback action..."; }')
+    search_results=$(yt-dlp "ytsearch20:$query" --cookies "$HOME/.config/yt-dlp/youtube-cookies.txt" --flat-playlist --print "%(title)s ➔ https://youtube.com/watch?v=%(id)s" --no-warnings 2>/dev/null)
+    if [ -z "$search_results" ]; then
+      notify-send "Search Error" "YouTube rejected scraping or no results found." -i notification-message-im
+      continue
+    fi
+
+    rofi_titles=$(echo -e "$search_results" | sed 's/ ➔ .*//' | sed 's/【/[/g; s/】/]/g; s/ //g; s/^[[:space:]]*//;s/[[:space:]]*$//')
+
+    selected_index=$(echo -e "$rofi_titles" | "${ROFI_NAV[@]}" -format i -p "Select Video" -theme-str 'entry { placeholder: "Select video track (Left Arrow goes Back)..."; }')
+    if [ $? -eq 10 ] || [ -z "$selected_index" ]; then continue; fi
+
+    matched_line=$(echo -e "$search_results" | sed -n "$((selected_index + 1))p")
+    url=$(echo "$matched_line" | sed 's/.* ➔ //')
+    title_extracted=$(echo "$matched_line" | sed 's/ ➔ .*//' | sed 's/【/[/g; s/】/]/g; s/ //g; s/^[[:space:]]*//;s/[[:space:]]*$//')
+
+    options="Play in New Window\nPlay Next (Queue)\nAppend to Queue\nReplace Active Session\nSave to Liked Videos\nAdd to Manual Playlist\nDownload Video"
+    choice=$(echo -e "$options" | "${ROFI_NAV[@]}" -p "Video Action" -theme-str 'entry { placeholder: "Choose playback action..."; }')
     if [ $? -eq 10 ] || [ -z "$choice" ]; then continue; fi
-
-    title_extracted=$(yt-dlp --print "%(title)s" --no-warnings "$url" 2>/dev/null | head -n 1)
-    [ -z "$title_extracted" ] && title_extracted="Video Track (${url##*=})"
 
     if [[ "$choice" == *"Save to Liked Videos"* ]]; then
       log_video_history "liked" "$url" "$title_extracted"
@@ -122,13 +140,12 @@ while true; do
     log_video_history "all" "$url" "$title_extracted" &
 
   # ----------------------------------------------------------------------------
-  # PATH B: Playlist & Mix Manager (Nesting Fix Implemented)
+  # PATH B: Playlist & Mix Manager (Links Hidden & Aligned)
   # ----------------------------------------------------------------------------
   elif [[ "$main_choice" == *"Playlist & Mix Manager"* ]]; then
     while true; do
-      # Ergonomic, beautifully organized parent level interface layer
-      mix_options="📋 Select Saved YouTube Mix\n➕ Paste New YouTube Mix\n📂 Manual Playlists"
-      mix_choice=$(echo -e "$mix_options" | "${ROFI_NAV[@]}" -p "🎵 Playlist Manager" -theme-str 'entry { placeholder: "🎵 Select playlist database option..."; }')
+      mix_options="Select Saved YouTube Mix\nPaste New YouTube Mix\nManual Playlists"
+      mix_choice=$(echo -e "$mix_options" | "${ROFI_NAV[@]}" -p "Playlist Manager" -theme-str 'entry { placeholder: "Select playlist database option..."; }')
       if [ $? -eq 10 ] || [ -z "$mix_choice" ]; then break; fi
 
       if [[ "$mix_choice" == *"Select Saved YouTube Mix"* ]]; then
@@ -136,18 +153,23 @@ while true; do
           notify-send "YouTube Error" "No mix history found!" -i notification-message-im
           continue
         fi
-        selected_line=$(cat "$PLAYLIST_HIST" | "${ROFI_NAV[@]}" -p "📋 YouTube Mixes" -theme-str 'entry { placeholder: "📋 Select a saved online mix..."; }')
-        if [ $? -eq 10 ] || [ -z "$selected_line" ]; then continue; fi
-        options="󰐊 Play in New Window\n🔄 Play in Reverse\n🔀 Play Shuffled\n⏭️ Play Next (Queue)\n󰎕 Append to Queue\n󰓦 Replace Active Session\n📌 Pin / Unpin Playlist\n❌ Remove Playlist\n🔼 Move Line Up\n🔽 Move Line Down"
-        choice=$(echo -e "$options" | "${ROFI_NAV[@]}" -p "󰚗 Playlist Action" -theme-str 'entry { placeholder: "󰚗 Choose action for saved mix..."; }')
+
+        mix_titles=$(cat "$PLAYLIST_HIST" | sed 's/ ➔ .*//' | sed 's/【/[/g; s/】/]/g; s/ //g; s/^[[:space:]]*//;s/[[:space:]]*$//')
+        selected_index=$(echo -e "$mix_titles" | "${ROFI_NAV[@]}" -format i -p "YouTube Mixes" -theme-str 'entry { placeholder: "Select a saved online mix..."; }')
+        if [ $? -eq 10 ] || [ -z "$selected_index" ]; then continue; fi
+
+        selected_line=$(cat "$PLAYLIST_HIST" | sed -n "$((selected_index + 1))p")
+        options="Play in New Window\nPlay Playlist in Reverse\nPlay Playlist Shuffled\nPlay Next (Queue)\nAppend to Queue\nReplace Active Session\nPin / Unpin Playlist\nRemove Playlist\nMove Line Up\nMove Line Down"
+        choice=$(echo -e "$options" | "${ROFI_NAV[@]}" -p "Playlist Action" -theme-str 'entry { placeholder: "Choose action for saved mix..."; }')
         if [ $? -eq 10 ] || [ -z "$choice" ]; then continue; fi
         mix_url=$(echo "$selected_line" | sed 's/.* ➔ //')
+
         if [[ "$choice" == *"Pin / Unpin Playlist"* ]]; then
-          if [[ "$selected_line" == 📌* ]]; then new_line=$(echo "$selected_line" | sed 's/^📌 //'); else new_line="📌 $selected_line"; fi
+          if [[ "$selected_line" == "\[PIN\] "* ]]; then new_line=$(echo "$selected_line" | sed 's/^\[PIN\] //'); else new_line="[PIN] $selected_line"; fi
           awk -v old="$selected_line" -v new="$new_line" '{if ($0 == old) print new; else print}' "$PLAYLIST_HIST" >"$HISTORY_DIR/tmp" && mv "$HISTORY_DIR/tmp" "$PLAYLIST_HIST"
           (
-            grep '^📌' "$PLAYLIST_HIST"
-            grep -v '^📌' "$PLAYLIST_HIST"
+            grep '^\[PIN\]' "$PLAYLIST_HIST"
+            grep -v '^\[PIN\]' "$PLAYLIST_HIST"
           ) >"$HISTORY_DIR/tmp_sort" && mv "$HISTORY_DIR/tmp_sort" "$PLAYLIST_HIST"
           continue
         elif [[ "$choice" == *"Remove Playlist"* ]]; then
@@ -171,30 +193,29 @@ while true; do
       elif [[ "$mix_choice" == *"Paste New YouTube Mix"* ]]; then
         clip=$(wl-paste 2>/dev/null)
         if [[ "$clip" =~ ^http ]]; then
-          mix_selection=$(echo -e "📋 Use Copied Link (${clip:0:30}...)\n⌨️ Enter URL Manually" | "${ROFI_NAV[@]}" -p "🔗 Select Source" -theme-str 'entry { placeholder: "🔗 Choose link source entry point..."; }')
+          mix_selection=$(echo -e "Use Copied Link (${clip:0:30}...)\nEnter URL Manually" | "${ROFI_NAV[@]}" -p "Select Source" -theme-str 'entry { placeholder: "Choose link source entry point..."; }')
           if [ $? -eq 10 ] || [ -z "$mix_selection" ]; then continue; fi
-          [[ "$mix_selection" == *"Use Copied Link"* ]] && mix_url="$clip" || mix_url=$("${ROFI_NAV[@]}" -p "⌨️ Paste Mix Link:" -theme-str 'entry { placeholder: "⌨️ Paste raw mix URL here..."; }')
-        else mix_url=$("${ROFI_NAV[@]}" -p "⌨️ Paste Mix Link:" -theme-str 'entry { placeholder: "⌨️ Paste raw mix URL here..."; }'); fi
+          [[ "$mix_selection" == *"Use Copied Link"* ]] && mix_url="$clip" || mix_url=$("${ROFI_NAV[@]}" -p "Paste Mix Link:" -theme-str 'entry { placeholder: "Paste raw mix URL here..."; }')
+        else mix_url=$("${ROFI_NAV[@]}" -p "Paste Mix Link:" -theme-str 'entry { placeholder: "Paste raw mix URL here..."; }'); fi
         if [ $? -eq 10 ] || [ -z "$mix_url" ]; then continue; fi
-        playlist_name=$("${ROFI_NAV[@]}" -p "󰚗 Name Mix" -theme-str 'entry { placeholder: "󰚗 Assign a custom name for reference..."; }')
+        playlist_name=$("${ROFI_NAV[@]}" -p "Name Mix" -theme-str 'entry { placeholder: "Assign a custom name for reference..."; }')
         if [ $? -eq 10 ] || [ -z "$playlist_name" ]; then continue; fi
         echo "$playlist_name ➔ $mix_url" | cat - "$PLAYLIST_HIST" >"$HISTORY_DIR/tmp_hist" && mv "$HISTORY_DIR/tmp_hist" "$PLAYLIST_HIST"
         (
-          grep '^📌' "$PLAYLIST_HIST"
-          grep -v '^📌' "$PLAYLIST_HIST"
+          grep '^\[PIN\]' "$PLAYLIST_HIST"
+          grep -v '^\[PIN\]' "$PLAYLIST_HIST"
         ) >"$HISTORY_DIR/tmp_sort" && mv "$HISTORY_DIR/tmp_sort" "$PLAYLIST_HIST"
         url="$mix_url"
         break
 
-      # NEW: Clean nested sub-menu layer that completely matches your intent
       elif [[ "$mix_choice" == *"Manual Playlists"* ]]; then
         while true; do
-          manual_options="📁 View / Play Playlist\n🆕 Create New Playlist\n❌ Delete Playlist"
-          manual_choice=$(echo -e "$manual_options" | "${ROFI_NAV[@]}" -p "📂 Playlists Manager" -theme-str 'entry { placeholder: "📂 Manage manual custom playlists..."; }')
-          if [ $? -eq 10 ] || [ -z "$manual_choice" ]; then break; fi # Pops smoothly back to mix loop level
+          manual_options="View / Play Playlist\nCreate New Playlist\nDelete Playlist"
+          manual_choice=$(echo -e "$manual_options" | "${ROFI_NAV[@]}" -p "Playlists Manager" -theme-str 'entry { placeholder: "Manage manual custom playlists..."; }')
+          if [ $? -eq 10 ] || [ -z "$manual_choice" ]; then break; fi
 
           if [[ "$manual_choice" == *"Create New Playlist"* ]]; then
-            new_pl=$("${ROFI_NAV[@]}" -p "🆕 New Playlist Name" -theme-str 'entry { placeholder: "Type name for new custom playlist..."; }')
+            new_pl=$("${ROFI_NAV[@]}" -p "New Playlist Name" -theme-str 'entry { placeholder: "Type name for new custom playlist..."; }')
             if [ $? -ne 10 ] && [ -n "$new_pl" ]; then
               touch "$MANUAL_PL_DIR/$new_pl.txt"
               notify-send "Manual Playlist" "Created empty playlist: $new_pl" -i notification-audio-play
@@ -205,10 +226,13 @@ while true; do
               notify-send "Playlist Error" "No manual playlists exist!" -i notification-message-im
               continue
             fi
-            del_pl=$(basename -a "$MANUAL_PL_DIR"/* | sed 's/\.txt//' | "${ROFI_NAV[@]}" -p "❌ Delete Playlist" -theme-str 'entry { placeholder: "Select manual playlist to permanently destroy..."; }')
-            if [ $? -ne 10 ] && [ -n "$del_pl" ]; then
-              rm -f "$MANUAL_PL_DIR/$del_pl.txt"
-              notify-send "Manual Playlist" "Deleted playlist: $del_pl" -i notification-message-im
+
+            pl_names=$(basename -a "$MANUAL_PL_DIR"/* | sed 's/\.txt//' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+            selected_index=$(echo -e "$pl_names" | "${ROFI_NAV[@]}" -format i -p "Delete Playlist" -theme-str 'entry { placeholder: "Select manual playlist to permanently destroy..."; }')
+            if [ $? -ne 10 ] && [ -n "$selected_index" ]; then
+              target_del=$(basename -a "$MANUAL_PL_DIR"/* | sed -n "$((selected_index + 1))p")
+              rm -f "$MANUAL_PL_DIR/$target_del"
+              notify-send "Manual Playlist" "Deleted playlist: ${target_del%.txt}" -i notification-message-im
             fi
             continue
           elif [[ "$manual_choice" == *"View / Play Playlist"* ]]; then
@@ -216,12 +240,16 @@ while true; do
               notify-send "Playlist Error" "No manual playlists exist!" -i notification-message-im
               continue
             fi
-            pl_target=$(basename -a "$MANUAL_PL_DIR"/* | sed 's/\.txt//' | "${ROFI_NAV[@]}" -p "📁 Open Playlist" -theme-str 'entry { placeholder: "Select manual playlist to load..."; }')
-            if [ $? -eq 10 ] || [ -z "$pl_target" ]; then continue; fi
-            active_file="$MANUAL_PL_DIR/$pl_target.txt"
-            placeholder="📁 Custom Playlist: $pl_target..."
+
+            pl_targets=$(basename -a "$MANUAL_PL_DIR"/* | sed 's/\.txt//' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+            selected_index=$(echo -e "$pl_targets" | "${ROFI_NAV[@]}" -format i -p "Open Playlist" -theme-str 'entry { placeholder: "Select manual playlist to load..."; }')
+            if [ $? -eq 10 ] || [ -z "$selected_index" ]; then continue; fi
+
+            target_file=$(basename -a "$MANUAL_PL_DIR"/* | sed -n "$((selected_index + 1))p")
+            active_file="$MANUAL_PL_DIR/$target_file"
+            placeholder="Custom Playlist: ${target_file%.txt}..."
             is_liked=true
-            break 2 # Escapes out to the global text processor block
+            break 2
           fi
         done
       fi
@@ -231,33 +259,39 @@ while true; do
   # PATH C: Video History Vault
   # ----------------------------------------------------------------------------
   elif [[ "$main_choice" == *"Video History Vault"* ]]; then
-    vault_choice=$(echo -e "❤️ Liked Videos Vault\n🔍 Manually Searched History\n📱 All Played Video History" | "${ROFI_NAV[@]}" -p "📜 History Vault" -theme-str 'entry { placeholder: "📜 Select history log segment..."; }')
+    vault_choice=$(echo -e "Liked Videos Vault\nManually Searched History\nAll Played Video History" | "${ROFI_NAV[@]}" -p "History Vault" -theme-str 'entry { placeholder: "Select history log segment..."; }')
     if [ $? -eq 10 ] || [ -z "$vault_choice" ]; then continue; fi
     if [[ "$vault_choice" == *"Liked Videos"* ]]; then
       active_file="$LIKED_HIST"
-      placeholder="❤️ Filter liked videos vault..."
+      placeholder="Filter liked videos vault..."
       is_liked=true
     elif [[ "$vault_choice" == *"Manually Searched"* ]]; then
       active_file="$SEARCHED_HIST"
-      placeholder="🔍 Filter manual searches..."
+      placeholder="Filter manual searches..."
       is_liked=false
     else
       active_file="$ALL_PLAYED_HIST"
-      placeholder="📱 Filter complete video history..."
+      placeholder="Filter complete video history..."
       is_liked=false
     fi
 
   # ----------------------------------------------------------------------------
-  # PATH D: Playlist Config & Neovim Editor Core
+  # PATH D: Playlist Config & Neovim Editor Core (Video Switch Added)
   # ----------------------------------------------------------------------------
   elif [[ "$main_choice" == *"Playlist Config"* ]]; then
     autoplay_status=$(cat "$AUTOPLAY_FILE")
-    config_options="🔄 Toggle Autoplay (Current: ${autoplay_status^^})\n❤️ Edit Liked Videos Vault\n📋 Edit Saved YouTube Mixes\n📂 Edit Manual Playlist"
-    config_choice=$(echo -e "$config_options" | "${ROFI_NAV[@]}" -p "⚙️ Configuration" -theme-str 'entry { placeholder: "⚙️ Select configuration file or option..."; }')
+    video_mode_status=$(cat "$VIDEO_MODE_FILE")
+
+    config_options="Toggle Autoplay (Current: ${autoplay_status^^})\nToggle Video Output (Current: ${video_mode_status^^})\nEdit Liked Videos Vault\nEdit Saved YouTube Mixes\nEdit Manual Playlist"
+    config_choice=$(echo -e "$config_options" | "${ROFI_NAV[@]}" -p "Configuration" -theme-str 'entry { placeholder: "Select configuration file or option..."; }')
     if [ $? -eq 10 ] || [ -z "$config_choice" ]; then continue; fi
 
     if [[ "$config_choice" == *"Toggle Autoplay"* ]]; then
       [ "$autoplay_status" == "yes" ] && echo "no" >"$AUTOPLAY_FILE" || echo "yes" >"$AUTOPLAY_FILE"
+      continue
+    elif [[ "$config_choice" == *"Toggle Video Output"* ]]; then
+      # Shifts application between rendering full visuals or forcing pure audio execution
+      [ "$video_mode_status" == "video" ] && echo "audio" >"$VIDEO_MODE_FILE" || echo "video" >"$VIDEO_MODE_FILE"
       continue
     elif [[ "$config_choice" == *"Edit Liked Videos"* ]]; then
       open_in_nvim "$LIKED_HIST"
@@ -270,14 +304,19 @@ while true; do
         notify-send "Playlist Error" "No manual playlists exist!" -i notification-message-im
         continue
       fi
-      edit_pl=$(basename -a "$MANUAL_PL_DIR"/* | sed 's/\.txt//' | "${ROFI_NAV[@]}" -p "📂 Select Edit Target" -theme-str 'entry { placeholder: "Select manual playlist file to pass to nvim..."; }')
-      [ $? -ne 10 ] && [ -n "$edit_pl" ] && open_in_nvim "$MANUAL_PL_DIR/$edit_pl.txt"
+
+      edit_targets=$(basename -a "$MANUAL_PL_DIR"/* | sed 's/\.txt//' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+      selected_index=$(echo -e "$edit_targets" | "${ROFI_NAV[@]}" -format i -p "Select Edit Target" -theme-str 'entry { placeholder: "Select manual playlist file to pass to nvim..."; }')
+      if [ $? -ne 10 ] && [ -n "$selected_index" ]; then
+        target_edit=$(basename -a "$MANUAL_PL_DIR"/* | sed -n "$((selected_index + 1))p")
+        open_in_nvim "$MANUAL_PL_DIR/$target_edit"
+      fi
       continue
     fi
   fi
 
   # ----------------------------------------------------------------------------
-  # Unified Text File Actions Step (Triggers seamlessly if active_file is loaded)
+  # Unified Text File Actions Step (Links Hidden & Punctuation Standardized)
   # ----------------------------------------------------------------------------
   if [ -n "$active_file" ]; then
     while true; do
@@ -285,27 +324,31 @@ while true; do
         notify-send "Vault Empty" "This tracking file is currently empty!" -i notification-message-im
         continue 2
       fi
-      selected_video=$(cat "$active_file" | "${ROFI_NAV[@]}" -p "📜 Entries" -theme-str "entry { placeholder: \"$placeholder\"; }")
-      if [ $? -eq 10 ] || [ -z "$selected_video" ]; then continue 2; fi
+
+      file_titles=$(cat "$active_file" | sed 's/ ➔ .*//' | sed 's/【/[/g; s/】/]/g; s/ //g; s/^[[:space:]]*//;s/[[:space:]]*$//')
+      selected_index=$(echo -e "$file_titles" | "${ROFI_NAV[@]}" -format i -p "Entries" -theme-str "entry { placeholder: \"$placeholder\"; }")
+      if [ $? -eq 10 ] || [ -z "$selected_index" ]; then continue 2; fi
+
+      selected_video=$(cat "$active_file" | sed -n "$((selected_index + 1))p")
 
       if [ "$is_liked" = true ]; then
-        options="󰐊 Play Selected Playlist Here\n🔄 Play Playlist in Reverse\n🔀 Play Playlist Shuffled\n⏭️ Play Next (Single Track)\n󰎕 Append Single to Queue\n📌 Pin / Unpin Item\n❌ Remove From List\n🔼 Move Line Up\n🔽 Move Line Down\n📂 Copy to Manual Playlist\n📥 Download Video"
+        options="Play Selected Playlist Here\nPlay Playlist in Reverse\nPlay Playlist Shuffled\nPlay Next (Single Track)\nAppend Single to Queue\nPin / Unpin Item\nRemove From List\nMove Line Up\nMove Line Down\nCopy to Manual Playlist\nDownload Video"
       else
-        options="󰐊 Play in New Window\n⏭️ Play Next (Queue)\n󰎕 Append to Queue\n󰓦 Replace Active Session\n❌ Remove From History\n❤️ Save to Liked Videos\n📂 Add to Manual Playlist\n📥 Download Video"
+        options="Play in New Window\nPlay Next (Queue)\nAppend to Queue\nReplace Active Session\nRemove From History\nSave to Liked Videos\nAdd to Manual Playlist\nDownload Video"
       fi
 
-      choice=$(echo -e "$options" | "${ROFI_NAV[@]}" -p "󰚗 Actions" -theme-str 'entry { placeholder: "󰚗 Choose execution step..."; }')
+      choice=$(echo -e "$options" | "${ROFI_NAV[@]}" -p "Actions" -theme-str 'entry { placeholder: "Choose execution step..."; }')
       if [ $? -eq 10 ] || [ -z "$choice" ]; then continue; fi
 
       url=$(echo "$selected_video" | sed 's/.* ➔ //')
-      title_part=$(echo "$selected_video" | sed 's/ ➔ .*//' | sed 's/^📌 //')
+      title_part=$(echo "$selected_video" | sed 's/ ➔ .*//' | sed 's/^\[PIN\] //')
 
       if [[ "$choice" == *"Pin / Unpin Item"* ]]; then
-        if [[ "$selected_video" == 📌* ]]; then new_line=$(echo "$selected_video" | sed 's/^📌 //'); else new_line="📌 $selected_video"; fi
+        if [[ "$selected_video" == "\[PIN\] "* ]]; then new_line=$(echo "$selected_video" | sed 's/^\[PIN\] //'); else new_line="[PIN] $selected_video"; fi
         awk -v old="$selected_video" -v new="$new_line" '{if ($0 == old) print new; else print}' "$active_file" >"$HISTORY_DIR/tmp" && mv "$HISTORY_DIR/tmp" "$active_file"
         (
-          grep '^📌' "$active_file"
-          grep -v '^📌' "$active_file"
+          grep '^\[PIN\]' "$active_file"
+          grep -v '^\[PIN\]' "$active_file"
         ) >"$HISTORY_DIR/tmp_sort" && mv "$HISTORY_DIR/tmp_sort" "$active_file"
         continue
       elif [[ "$choice" == *"Remove From"* ]]; then
@@ -349,9 +392,13 @@ while true; do
       kill -0 "${sock##*-}" 2>/dev/null && sockets+=("$sock") || rm -f "$sock"
     done
 
+    # Intercept current config file selection to compile dynamic MPV window tokens
+    mpv_video_flag=""
+    [ "$(cat "$VIDEO_MODE_FILE")" == "audio" ] && mpv_video_flag="--no-video"
+
     if [ ${#sockets[@]} -eq 0 ] && [[ "$choice" == *"Append"* || "$choice" == *"Play Next"* || "$choice" == *"Replace"* ]]; then
       notify-send "YouTube Error" "No active session found! Opening separately." -i notification-message-im
-      mpv "$url" &
+      mpv $mpv_video_flag "$url" &
       exit 0
     elif [ ${#sockets[@]} -eq 1 ]; then
       target_socket="${sockets[0]}"
@@ -361,11 +408,11 @@ while true; do
       for sock in "${sockets[@]}"; do
         title=$(echo '{ "command": ["get_property_string", "media-title"] }' | socat - "$sock" 2>/dev/null | sed -n 's/.*"data":"\(.*\)","error".*/\1/p')
         [ -z "$title" ] && title="Idle Player Instance"
-        display_line="󰎕 $title (PID: ${sock##*-})"
+        display_line="$title (PID: ${sock##*-})"
         rofi_input+="$display_line\n"
         title_to_socket["$display_line"]="$sock"
       done
-      selected_display=$(echo -e "${rofi_input%\\n}" | "${ROFI_NAV[@]}" -p "󰚗 Target Session" -theme-str 'entry { placeholder: "󰚗 Select active session instance..."; }')
+      selected_display=$(echo -e "${rofi_input%\\n}" | "${ROFI_NAV[@]}" -p "Target Session" -theme-str 'entry { placeholder: "Select active session instance..."; }')
       if [ $? -eq 10 ] || [ -z "$selected_display" ]; then continue; fi
       target_socket="${title_to_socket[$selected_display]}"
     fi
@@ -377,7 +424,7 @@ while true; do
     *"Play Selected Playlist Here"*)
       line_num=$(grep -n -F "$selected_video" "$active_file" | head -n1 | cut -d: -f1)
       compile_m3u "$active_file" "/tmp/rofi_mpv_playlist.m3u"
-      mpv --script-opts="$autoplay_flag" --playlist-start=$((line_num - 1)) "/tmp/rofi_mpv_playlist.m3u" &
+      mpv $mpv_video_flag --script-opts="$autoplay_flag" --playlist-start=$((line_num - 1)) "/tmp/rofi_mpv_playlist.m3u" &
       notify-send "Playlist Player" "Loading local block playlist..." -i notification-audio-play
       ;;
     *"Play Playlist in Reverse"*)
@@ -385,17 +432,17 @@ while true; do
       total_lines=$(wc -l <"$active_file")
       tac "$active_file" >"/tmp/rofi_reversed.txt"
       compile_m3u "/tmp/rofi_reversed.txt" "/tmp/rofi_mpv_playlist.m3u"
-      mpv --script-opts="$autoplay_flag" --playlist-start=$((total_lines - line_num)) "/tmp/rofi_mpv_playlist.m3u" &
+      mpv $mpv_video_flag --script-opts="$autoplay_flag" --playlist-start=$((total_lines - line_num)) "/tmp/rofi_mpv_playlist.m3u" &
       notify-send "Playlist Player" "Loading reversed local playlist..." -i notification-audio-play
       ;;
     *"Play Playlist Shuffled"*)
       compile_m3u "$active_file" "/tmp/rofi_mpv_playlist.m3u"
-      mpv --script-opts="$autoplay_flag" --shuffle "/tmp/rofi_mpv_playlist.m3u" &
+      mpv $mpv_video_flag --script-opts="$autoplay_flag" --shuffle "/tmp/rofi_mpv_playlist.m3u" &
       notify-send "Playlist Player" "Loading randomized local playlist..." -i notification-audio-play
       ;;
     *"Play in New Window"*)
-      mpv "$url" &
-      notify-send "YouTube Player" "Opening track in a new window" -i notification-audio-play
+      mpv $mpv_video_flag "$url" &
+      notify-send "YouTube Player" "Opening track window instance" -i notification-audio-play
       ;;
     *"Append to Queue"*)
       echo '{ "command": ["loadfile", "'"$url"'", "append"] }' | socat - "$target_socket"
