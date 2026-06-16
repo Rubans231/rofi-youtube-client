@@ -116,7 +116,7 @@ while true; do
   if [ $? -eq 10 ] || [ -z "$main_choice" ]; then exit 0; fi
 
   # ----------------------------------------------------------------------------
-  # PATH A: Direct Search Pipeline
+  # PATH A: Direct Search Pipeline (Smart-Gated Music Automix)
   # ----------------------------------------------------------------------------
   if [[ "$main_choice" == *"Search YouTube"* ]]; then
     query=$("${ROFI_NAV[@]}" -p "YouTube Search" -theme-str 'entry { placeholder: "Type search query (Left Arrow goes Back)..."; }')
@@ -124,30 +124,56 @@ while true; do
 
     notify-send "Search Engine" "Querying YouTube securely..." -i notification-audio-play
 
-    # Formats native endpoints for videos, channels, and playlists, filtering out broken items
-    search_results=$(yt-dlp "ytsearch20:$query" \
+    # 1. Fetch search results normally
+    raw_results=$(yt-dlp "ytsearch20:$query" \
       --user-agent "$BROWSER_UA" \
       --cookies "$COOKIE_PATH" \
       --flat-playlist \
       --print "%(title)s ➔ %(url)s" \
       --no-warnings 2>/dev/null | grep -E '(watch\?v=[A-Za-z0-9_-]{11}$|/channel/UC[A-Za-z0-9_-]{22}$|playlist\?list=PL[A-Za-z0-9_-]{32}$)')
 
-    if [ -z "$search_results" ]; then
+    if [ -z "$raw_results" ]; then
       notify-send "Search Error" "YouTube rejected scraping or no valid items found." -i notification-message-im
       continue
     fi
 
-    # Restored wide Japanese space replacement 's/ //g' to safeguard layout spacing
-    rofi_titles=$(echo -e "$search_results" | sed 's/ ➔ .*//' | sed 's/【/[/g; s/】/]/g; s/ //g; s/^[[:space:]]*//;s/[[:space:]]*$//')
+    # 2. Extract the first valid video URL to check its category
+    first_video_url=$(echo -e "$raw_results" | grep 'watch?v=' | head -n 1 | sed -n 's/.* ➔ \(http.*\)/\1/p')
+    is_music=false
+
+    if [ -n "$first_video_url" ]; then
+      video_category=$(yt-dlp --user-agent "$BROWSER_UA" --cookies "$COOKIE_PATH" --print "%(categories)s" --no-warnings "$first_video_url" 2>/dev/null | head -n 1)
+      if [[ "$video_category" == *"Music"* ]]; then
+        is_music=true
+      fi
+    fi
+
+    # 3. Inject AUTOMIX only if it passes the Music category gateway check
+    if [ "$is_music" = true ]; then
+      seed_video_id=$(echo "$first_video_url" | sed -n 's/.*v=\([A-Za-z0-9_-]\{11\}\).*/\1/p')
+      recommendation_title="✨ [AUTOMIX] Discover ${query} Radio Station"
+      recommendation_url="https://www.youtube.com/watch?v=${seed_video_id}&list=RD${seed_video_id}&start_radio=1"
+      search_results="${recommendation_title} ➔ ${recommendation_url}\n${raw_results}"
+    else
+      search_results="$raw_results"
+    fi
+
+    # FIXED: Replaced aggressive text-stripping blocks with fine boundary padding rules to fix spacing
+    rofi_titles=$(echo -e "$search_results" | sed 's/ ➔ .*//' | sed 's/【/[/g; s/】/]/g; s/^[[:space:]]*//;s/[[:space:]]*$//')
 
     selected_index=$(echo -e "$rofi_titles" | "${ROFI_NAV[@]}" -format i -p "Select Item" -theme-str 'entry { placeholder: "Select track or link (Left Arrow goes Back)..."; }')
     if [ $? -eq 10 ] || [ -z "$selected_index" ]; then continue; fi
 
     matched_line=$(echo -e "$search_results" | sed -n "$((selected_index + 1))p")
     url=$(echo "$matched_line" | sed 's/.* ➔ //')
-    title_extracted=$(echo "$matched_line" | sed 's/ ➔ .*//' | sed 's/【/[/g; s/】/]/g; s/ //g; s/^[[:space:]]*//;s/[[:space:]]*$//')
+    title_extracted=$(echo "$matched_line" | sed 's/ ➔ .*//' | sed 's/【/[/g; s/】/]/g; s/^[[:space:]]*//;s/[[:space:]]*$//')
 
-    options="Play in New Window\nPlay Next (Queue)\nAppend to Queue\nReplace Active Session\nSave to Liked Videos\nAdd to Manual Playlist\nDownload Video"
+    if [[ "$title_extracted" == *"[AUTOMIX]"* ]]; then
+      options="Play Mix in New Window\nPlay Mix Next (Queue)\nAppend Mix to Queue\nReplace Active Session"
+    else
+      options="Play in New Window\nPlay Next (Queue)\nAppend to Queue\nReplace Active Session\nSave to Liked Videos\nAdd to Manual Playlist\nDownload Video"
+    fi
+
     choice=$(echo -e "$options" | "${ROFI_NAV[@]}" -p "Video Action" -theme-str 'entry { placeholder: "Choose playback action..."; }')
     if [ $? -eq 10 ] || [ -z "$choice" ]; then continue; fi
 
@@ -163,8 +189,11 @@ while true; do
       yt-dlp --user-agent "$BROWSER_UA" --cookies "$COOKIE_PATH" -P "~/Downloads" "$url" &
       continue
     fi
-    log_video_history "search" "$url" "$title_extracted" &
-    log_video_history "all" "$url" "$title_extracted" &
+
+    if [[ "$title_extracted" != *"[AUTOMIX]"* ]]; then
+      log_video_history "search" "$url" "$title_extracted" &
+      log_video_history "all" "$url" "$title_extracted" &
+    fi
 
   # ----------------------------------------------------------------------------
   # PATH B: Playlist & Mix Manager
@@ -181,7 +210,7 @@ while true; do
           continue
         fi
 
-        mix_titles=$(cat "$PLAYLIST_HIST" | sed 's/ ➔ .*//' | sed 's/【/[/g; s/】/]/g; s/ //g; s/^[[:space:]]*//;s/[[:space:]]*$//')
+        mix_titles=$(cat "$PLAYLIST_HIST" | sed 's/ ➔ .*//' | sed 's/【/[/g; s/】/]/g; s/^[[:space:]]*//;s/[[:space:]]*$//')
         selected_index=$(echo -e "$mix_titles" | "${ROFI_NAV[@]}" -format i -p "YouTube Mixes" -theme-str 'entry { placeholder: "Select a saved online mix..."; }')
         if [ $? -eq 10 ] || [ -z "$selected_index" ]; then continue; fi
 
@@ -351,7 +380,7 @@ while true; do
         continue 2
       fi
 
-      file_titles=$(cat "$active_file" | sed 's/ ➔ .*//' | sed 's/【/[/g; s/】/]/g; s/ //g; s/^[[:space:]]*//;s/[[:space:]]*$//')
+      file_titles=$(cat "$active_file" | sed 's/ ➔ .*//' | sed 's/【/[/g; s/】/]/g; s/^[[:space:]]*//;s/[[:space:]]*$//')
       selected_index=$(echo -e "$file_titles" | "${ROFI_NAV[@]}" -format i -p "Entries" -theme-str "entry { placeholder: \"$placeholder\"; }")
       if [ $? -eq 10 ] || [ -z "$selected_index" ]; then continue 2; fi
 
@@ -422,8 +451,6 @@ while true; do
     [ "$(cat "$VIDEO_MODE_FILE")" == "audio" ] && mpv_video_flag="--no-video"
 
     MPV_UA_OPT="--user-agent=$BROWSER_UA"
-
-    # FIXED: Re-mapped options array into sequential append flags to resolve syntax splitting issues
     MPV_COOKIES="--ytdl-raw-options=yes-playlist= --ytdl-raw-options-append=cookies=$COOKIE_PATH --ytdl-raw-options-append=mark-watched="
 
     if [ ${#sockets[@]} -eq 0 ] && [[ "$choice" == *"Append"* || "$choice" == *"Play Next"* || "$choice" == *"Replace"* ]]; then
@@ -470,15 +497,15 @@ while true; do
       setsid env WAYLAND_DISPLAY="$WAYLAND_DISPLAY" DISPLAY="$DISPLAY" mpv --input-ipc-server="/tmp/mpvsocket-$$" "$MPV_UA_OPT" $MPV_COOKIES $mpv_video_flag --script-opts="$autoplay_flag" --shuffle "/tmp/rofi_mpv_playlist.m3u" >/dev/null 2>&1 &
       notify-send "Playlist Player" "Loading randomized local playlist..." -i notification-audio-play
       ;;
-    *"Play in New Window"*)
+    *"Play in New Window"* | *"Play Mix in New Window"*)
       setsid env WAYLAND_DISPLAY="$WAYLAND_DISPLAY" DISPLAY="$DISPLAY" mpv --input-ipc-server="/tmp/mpvsocket-$$" "$MPV_UA_OPT" $MPV_COOKIES $mpv_video_flag "$url" >/dev/null 2>&1 &
       notify-send "YouTube Player" "Opening track window instance" -i notification-audio-play
       ;;
-    *"Append to Queue"*)
+    *"Append to Queue"* | *"Append Mix to Queue"*)
       echo '{"command": ["loadfile", "'"$url"'", "append"]}' | socat - UNIX-CONNECT:"$target_socket"
       notify-send "YouTube Queue" "Appended to end of stream!" -i notification-audio-play
       ;;
-    *"Play Next"*)
+    *"Play Next"* | *"Play Mix Next (Queue)"*)
       if [ -S "$target_socket" ]; then
         echo '{"command": ["loadfile", "'"$url"'", "append-play"]}' | socat - UNIX-CONNECT:"$target_socket"
         notify-send "YouTube Queue" "Inserted track to play next!" -i notification-audio-play
