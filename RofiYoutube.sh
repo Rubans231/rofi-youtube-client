@@ -59,7 +59,6 @@ log_video_history() {
   esac
   local video_title="$custom_title"
   if [ -z "$video_title" ]; then
-    # FIXED: Added cookie and user-agent string authentication right here
     video_title=$(yt-dlp --cookies "$COOKIE_PATH" --user-agent "$BROWSER_UA" --print "%(title)s" --no-warnings "$video_url" 2>/dev/null | head -n 1)
     [ -z "$video_title" ] && video_title="Video Track (${video_url##*=})"
   fi
@@ -117,7 +116,7 @@ while true; do
   if [ $? -eq 10 ] || [ -z "$main_choice" ]; then exit 0; fi
 
   # ----------------------------------------------------------------------------
-  # PATH A: Direct Bulletproof yt-dlp Search Pipeline (Personalized & Aligned)
+  # PATH A: Direct Search Pipeline
   # ----------------------------------------------------------------------------
   if [[ "$main_choice" == *"Search YouTube"* ]]; then
     query=$("${ROFI_NAV[@]}" -p "YouTube Search" -theme-str 'entry { placeholder: "Type search query (Left Arrow goes Back)..."; }')
@@ -125,16 +124,23 @@ while true; do
 
     notify-send "Search Engine" "Querying YouTube securely..." -i notification-audio-play
 
-    # LOCKED: Secure cookie verification handshake
-    search_results=$(yt-dlp "ytsearch20:$query" --user-agent "$BROWSER_UA" --cookies "$COOKIE_PATH" --flat-playlist --print "%(title)s ➔ https://youtube.com/watch?v=%(id)s" --no-warnings 2>/dev/null)
+    # Formats native endpoints for videos, channels, and playlists, filtering out broken items
+    search_results=$(yt-dlp "ytsearch20:$query" \
+      --user-agent "$BROWSER_UA" \
+      --cookies "$COOKIE_PATH" \
+      --flat-playlist \
+      --print "%(title)s ➔ %(url)s" \
+      --no-warnings 2>/dev/null | grep -E '(watch\?v=[A-Za-z0-9_-]{11}$|/channel/UC[A-Za-z0-9_-]{22}$|playlist\?list=PL[A-Za-z0-9_-]{32}$)')
+
     if [ -z "$search_results" ]; then
-      notify-send "Search Error" "YouTube rejected scraping or no results found." -i notification-message-im
+      notify-send "Search Error" "YouTube rejected scraping or no valid items found." -i notification-message-im
       continue
     fi
 
+    # Restored wide Japanese space replacement 's/ //g' to safeguard layout spacing
     rofi_titles=$(echo -e "$search_results" | sed 's/ ➔ .*//' | sed 's/【/[/g; s/】/]/g; s/ //g; s/^[[:space:]]*//;s/[[:space:]]*$//')
 
-    selected_index=$(echo -e "$rofi_titles" | "${ROFI_NAV[@]}" -format i -p "Select Video" -theme-str 'entry { placeholder: "Select video track (Left Arrow goes Back)..."; }')
+    selected_index=$(echo -e "$rofi_titles" | "${ROFI_NAV[@]}" -format i -p "Select Item" -theme-str 'entry { placeholder: "Select track or link (Left Arrow goes Back)..."; }')
     if [ $? -eq 10 ] || [ -z "$selected_index" ]; then continue; fi
 
     matched_line=$(echo -e "$search_results" | sed -n "$((selected_index + 1))p")
@@ -154,7 +160,6 @@ while true; do
       continue
     elif [[ "$choice" == *"Download Video"* ]]; then
       notify-send "Downloader" "Starting background download to ~/Downloads..." -i notification-audio-play
-      # FIXED: Passed identity cookies to background downloader block
       yt-dlp --user-agent "$BROWSER_UA" --cookies "$COOKIE_PATH" -P "~/Downloads" "$url" &
       continue
     fi
@@ -162,7 +167,7 @@ while true; do
     log_video_history "all" "$url" "$title_extracted" &
 
   # ----------------------------------------------------------------------------
-  # PATH B: Playlist & Mix Manager (Links Hidden & Aligned)
+  # PATH B: Playlist & Mix Manager
   # ----------------------------------------------------------------------------
   elif [[ "$main_choice" == *"Playlist & Mix Manager"* ]]; then
     while true; do
@@ -337,7 +342,7 @@ while true; do
   fi
 
   # ----------------------------------------------------------------------------
-  # Unified Text File Actions Step (Punctuation Standardized)
+  # Unified Text File Actions Step
   # ----------------------------------------------------------------------------
   if [ -n "$active_file" ]; then
     while true; do
@@ -395,7 +400,6 @@ while true; do
         continue
       elif [[ "$choice" == *"Download Video"* ]]; then
         notify-send "Downloader" "Starting background download to ~/Downloads..." -i notification-audio-play
-        # FIXED: Hooked authentication configs to the second downloader block
         yt-dlp --user-agent "$BROWSER_UA" --cookies "$COOKIE_PATH" -P "~/Downloads" "$url" &
         continue
       fi
@@ -417,13 +421,14 @@ while true; do
     mpv_video_flag=""
     [ "$(cat "$VIDEO_MODE_FILE")" == "audio" ] && mpv_video_flag="--no-video"
 
-    # CRITICAL INJECTION: Binds the User-Agent directly to MPV's backend connection plugins
-    # This prevents the stream from dropping out or running unauthenticated
     MPV_UA_OPT="--user-agent=$BROWSER_UA"
+
+    # FIXED: Re-mapped options array into sequential append flags to resolve syntax splitting issues
+    MPV_COOKIES="--ytdl-raw-options=yes-playlist= --ytdl-raw-options-append=cookies=$COOKIE_PATH --ytdl-raw-options-append=mark-watched="
 
     if [ ${#sockets[@]} -eq 0 ] && [[ "$choice" == *"Append"* || "$choice" == *"Play Next"* || "$choice" == *"Replace"* ]]; then
       notify-send "YouTube Error" "No active session found! Opening separately." -i notification-message-im
-      bash -c 'exec mpv --input-ipc-server="/tmp/mpvsocket-$$" "$@"' _ "$MPV_UA_OPT" $mpv_video_flag "$url" &
+      setsid env WAYLAND_DISPLAY="$WAYLAND_DISPLAY" DISPLAY="$DISPLAY" mpv --input-ipc-server="/tmp/mpvsocket-$$" "$MPV_UA_OPT" $MPV_COOKIES $mpv_video_flag "$url" >/dev/null 2>&1 &
       exit 0
     elif [ ${#sockets[@]} -eq 1 ]; then
       target_socket="${sockets[0]}"
@@ -431,7 +436,7 @@ while true; do
       rofi_input=""
       declare -A title_to_socket
       for sock in "${sockets[@]}"; do
-        title=$(echo '{ "command": ["get_property_string", "media-title"] }' | socat - "$sock" 2>/dev/null | sed -n 's/.*"data":"\(.*\)","error".*/\1/p')
+        title=$(echo '{ "command": ["get_property_string", "media-title"] }' | socat - UNIX-CONNECT:"$sock" 2>/dev/null | head -n 1 | sed -n 's/.*"data":"\(.*\)","error".*/\1/p')
         [ -z "$title" ] && title="Idle Player Instance"
         display_line="$title (PID: ${sock##*-})"
         rofi_input+="$display_line\n"
@@ -449,39 +454,44 @@ while true; do
     *"Play Selected Playlist Here"*)
       line_num=$(grep -n -F "$selected_video" "$active_file" | head -n1 | cut -d: -f1)
       compile_m3u "$active_file" "/tmp/rofi_mpv_playlist.m3u"
-      bash -c 'exec mpv --input-ipc-server="/tmp/mpvsocket-$$" "$@"' _ "$MPV_UA_OPT" $mpv_video_flag --script-opts="$autoplay_flag" --playlist-start=$((line_num - 1)) "/tmp/rofi_mpv_playlist.m3u" &
-      notify-send "Playlist Player" "Loading local block playlist..." -i notification-audio-play
+      setsid env WAYLAND_DISPLAY="$WAYLAND_DISPLAY" DISPLAY="$DISPLAY" mpv --input-ipc-server="/tmp/mpvsocket-$$" "$MPV_UA_OPT" $MPV_COOKIES $mpv_video_flag --script-opts="$autoplay_flag" --playlist-start=$((line_num - 1)) "/tmp/rofi_mpv_playlist.m3u" >/dev/null 2>&1 &
+      notify-send "Playlist Player" "Loading local playlist..." -i notification-audio-play
       ;;
     *"Play Playlist in Reverse"*)
       line_num=$(grep -n -F "$selected_video" "$active_file" | head -n1 | cut -d: -f1)
       total_lines=$(wc -l <"$active_file")
       tac "$active_file" >"/tmp/rofi_reversed.txt"
       compile_m3u "/tmp/rofi_reversed.txt" "/tmp/rofi_mpv_playlist.m3u"
-      bash -c 'exec mpv --input-ipc-server="/tmp/mpvsocket-$$" "$@"' _ "$MPV_UA_OPT" $mpv_video_flag --script-opts="$autoplay_flag" --playlist-start=$((total_lines - line_num)) "/tmp/rofi_mpv_playlist.m3u" &
+      setsid env WAYLAND_DISPLAY="$WAYLAND_DISPLAY" DISPLAY="$DISPLAY" mpv --input-ipc-server="/tmp/mpvsocket-$$" "$MPV_UA_OPT" $MPV_COOKIES $mpv_video_flag --script-opts="$autoplay_flag" --playlist-start=$((total_lines - line_num)) "/tmp/rofi_mpv_playlist.m3u" >/dev/null 2>&1 &
       notify-send "Playlist Player" "Loading reversed local playlist..." -i notification-audio-play
       ;;
     *"Play Playlist Shuffled"*)
       compile_m3u "$active_file" "/tmp/rofi_mpv_playlist.m3u"
-      bash -c 'exec mpv --input-ipc-server="/tmp/mpvsocket-$$" "$@"' _ "$MPV_UA_OPT" $mpv_video_flag --script-opts="$autoplay_flag" --shuffle "/tmp/rofi_mpv_playlist.m3u" &
+      setsid env WAYLAND_DISPLAY="$WAYLAND_DISPLAY" DISPLAY="$DISPLAY" mpv --input-ipc-server="/tmp/mpvsocket-$$" "$MPV_UA_OPT" $MPV_COOKIES $mpv_video_flag --script-opts="$autoplay_flag" --shuffle "/tmp/rofi_mpv_playlist.m3u" >/dev/null 2>&1 &
       notify-send "Playlist Player" "Loading randomized local playlist..." -i notification-audio-play
       ;;
     *"Play in New Window"*)
-      bash -c 'exec mpv --input-ipc-server="/tmp/mpvsocket-$$" "$@"' _ "$MPV_UA_OPT" $mpv_video_flag "$url" &
+      setsid env WAYLAND_DISPLAY="$WAYLAND_DISPLAY" DISPLAY="$DISPLAY" mpv --input-ipc-server="/tmp/mpvsocket-$$" "$MPV_UA_OPT" $MPV_COOKIES $mpv_video_flag "$url" >/dev/null 2>&1 &
       notify-send "YouTube Player" "Opening track window instance" -i notification-audio-play
       ;;
     *"Append to Queue"*)
-      echo '{ "command": ["loadfile", "'"$url"'", "append"] }' | socat - "$target_socket"
+      echo '{"command": ["loadfile", "'"$url"'", "append"]}' | socat - UNIX-CONNECT:"$target_socket"
       notify-send "YouTube Queue" "Appended to end of stream!" -i notification-audio-play
       ;;
     *"Play Next"*)
-      current_pos=$(echo '{ "command": ["get_property", "playlist-pos"] }' | socat - "$target_socket" 2>/dev/null | sed -n 's/.*"data":\([0-9]\+\).*/\1/p')
-      [ -z "$current_pos" ] && current_pos=0
-      echo '{ "command": ["playlist-insert", '$((current_pos + 1))', "'"$url"'"] }' | socat - "$target_socket"
-      notify-send "YouTube Queue" "Inserted track to play next!" -i notification-audio-play
+      if [ -S "$target_socket" ]; then
+        echo '{"command": ["loadfile", "'"$url"'", "append-play"]}' | socat - UNIX-CONNECT:"$target_socket"
+        notify-send "YouTube Queue" "Inserted track to play next!" -i notification-audio-play
+      else
+        setsid env WAYLAND_DISPLAY="$WAYLAND_DISPLAY" DISPLAY="$DISPLAY" mpv --input-ipc-server="/tmp/mpvsocket-$$" "$MPV_UA_OPT" $MPV_COOKIES $mpv_video_flag "$url" >/dev/null 2>&1 &
+        notify-send "YouTube Queue" "Queue empty. Initializing playback engine!" -i notification-audio-play
+      fi
       ;;
     *"Replace Active Session"*)
-      echo '{ "command": ["loadfile", "'"$url"'", "replace"] }' | socat - "$target_socket"
-      notify-send "YouTube Player" "Loaded into active session!" -i notification-audio-play
+      [ -n "$target_socket" ] && echo '{"command": ["quit"]}' | socat - UNIX-CONNECT:"$target_socket" 2>/dev/null
+      sleep 0.5
+      setsid env WAYLAND_DISPLAY="$WAYLAND_DISPLAY" DISPLAY="$DISPLAY" mpv --input-ipc-server="/tmp/mpvsocket-$$" "$MPV_UA_OPT" $MPV_COOKIES $mpv_video_flag "$url" >/dev/null 2>&1 &
+      notify-send "YouTube Player" "Session reset and track loaded!" -i notification-audio-play
       ;;
     esac
   fi
