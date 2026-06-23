@@ -103,13 +103,14 @@ while true; do
     else
       autoplay_flag="youtube_upnext-auto_add=yes"
     fi
-
+    # bestaudio/best: Tells the engine to prioritize the highest available Opus stream
+    MPV_AUDIO_PREF="--ytdl-raw-options-append=format=bestaudio/best"
     MPV_UA_OPT="--user-agent=$BROWSER_UA"
     MPV_COOKIES="--ytdl-raw-options=yes-playlist= --ytdl-raw-options-append=cookies=$COOKIE_PATH --ytdl-raw-options-append=mark-watched="
 
     if [ ${#sockets[@]} -eq 0 ] && [[ "$choice" == *"Append"* || "$choice" == *"Play Next"* || "$choice" == *"Replace"* ]]; then
       notify-send "YouTube Error" "No active session found! Opening separately." -i notification-message-im
-      setsid env WAYLAND_DISPLAY="$WAYLAND_DISPLAY" DISPLAY="$DISPLAY" mpv --input-ipc-server="/tmp/mpvsocket-$$" "$MPV_UA_OPT" $MPV_COOKIES $mpv_video_flag --script-opts="$autoplay_flag" "$url" >/dev/null 2>&1 &
+      setsid env WAYLAND_DISPLAY="$WAYLAND_DISPLAY" DISPLAY="$DISPLAY" mpv --input-ipc-server="/tmp/mpvsocket-$$" "$MPV_UA_OPT" $MPV_AUDIO_PREF $MPV_COOKIES $mpv_video_flag --script-opts="$autoplay_flag" "$url" >/dev/null 2>&1 &
       continue
     elif [ ${#sockets[@]} -eq 1 ]; then
       target_socket="${sockets[0]}"
