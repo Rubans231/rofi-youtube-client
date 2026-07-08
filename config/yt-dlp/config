@@ -1,0 +1,4 @@
+# Native Authentication & Profile Ledger Configuration
+--cookies /home/robin/.config/yt-dlp/youtube-cookies.txt
+--user-agent "Mozilla/5.0 (X11; Linux x86_64; rv:152.0) Gecko/20100101 Firefox/152.0"
+--mark-watched
