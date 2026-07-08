@@ -21,7 +21,7 @@ fi
 echo $$ >"$LOCKFILE"
 trap 'rm -f "$LOCKFILE"' EXIT
 
-# Export absolute module path routing configurations
+# Export absolute module path routing configurations (Fully Portable via $HOME)
 export MODULE_DIR="$HOME/.config/hypr/UserScripts/RofiYoutube"
 export HISTORY_DIR="$HOME/.cache/RofiYoutube"
 export PLAYLIST_HIST="$HISTORY_DIR/playlist_history.txt"
@@ -32,7 +32,7 @@ export LIKED_HIST="$HISTORY_DIR/liked_history.txt"
 export MANUAL_PL_DIR="$HISTORY_DIR/manual_playlists"
 export VIDEO_MODE_FILE="$HISTORY_DIR/video_mode.txt"
 
-# Exact environmental dependencies configurations (Strict Zen Browser Alignment)
+# Exact environmental dependencies configurations (Strict Browser Alignment)
 export BROWSER_UA="Mozilla/5.0 (X11; Linux x86_64; rv:152.0) Gecko/20100101 Firefox/152.0"
 export COOKIE_PATH="$HOME/.config/yt-dlp/youtube-cookies.txt"
 
@@ -141,8 +141,16 @@ while true; do
     MPV_UA_OPT="--user-agent=$BROWSER_UA"
     MPV_COOKIES="--cookies-file=$COOKIE_PATH"
 
-    # REVERTED CLEAN HANDOFF: Settings are handled cleanly via global configuration profiles now
-    MPV_OPTS="--ytdl-raw-options=format=$YTDL_FORMAT"
+    # FIXED: Hardened Array architecture forces background lookahead and RAM pre-caching options cleanly
+    MPV_OPTS=(
+      "--ytdl-raw-options=format=$YTDL_FORMAT"
+      "--prefetch-playlist=yes"
+      "--cache=yes"
+      "--cache-secs=300"
+      "--demuxer-readahead-secs=60"
+      "--demuxer-max-bytes=500MiB"
+      "--demuxer-max-back-bytes=100MiB"
+    )
 
     # --------------------------------------------------------------------------
     # TARGET SESSION RESOLUTION GATEWAY
@@ -159,7 +167,6 @@ while true; do
         rofi_input=""
         declare -A title_to_socket
         for sock in "${sockets[@]}"; do
-          # Space-agnostic sed matching targets the exact title string payload over the IPC socket wire
           title=$(echo '{"command": ["get_property", "media-title"]}' | socat -t 0.2 - UNIX-CONNECT:"$sock" 2>/dev/null | head -n 1 | sed -n 's/.*"data"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
           [ -z "$title" ] && title="Buffering Track Session..."
           display_line="$title (ID: ${sock##*/mpvsocket-})"
@@ -172,14 +179,13 @@ while true; do
       fi
     fi
 
-    # Unique identifier matching your system shell process directly
     instance_id=$$
 
     case "$choice" in
     *"Play Selected Playlist Here"*)
       line_num=$(grep -n -F "$selected_video" "$active_file" | head -n1 | cut -d: -f1)
       source "$MODULE_DIR/manager.sh" --compile-only
-      env WAYLAND_DISPLAY="$WAYLAND_DISPLAY" DISPLAY="$DISPLAY" XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" mpv --input-ipc-server="/tmp/mpvsocket-$instance_id" "$MPV_UA_OPT" "$MPV_COOKIES" $MPV_OPTS "${mpv_video_flag[@]}" --playlist-start=$((line_num - 1)) "/tmp/rofi_mpv_playlist.m3u" >/dev/null 2>&1 &
+      env WAYLAND_DISPLAY="$WAYLAND_DISPLAY" DISPLAY="$DISPLAY" XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" mpv --input-ipc-server="/tmp/mpvsocket-$instance_id" "$MPV_UA_OPT" "$MPV_COOKIES" "${MPV_OPTS[@]}" "${mpv_video_flag[@]}" --playlist-start=$((line_num - 1)) "/tmp/rofi_mpv_playlist.m3u" >/dev/null 2>&1 &
       notify-send "Playlist Player" "Loading local playlist..." -i notification-audio-play
       ;;
     *"Play Playlist in Reverse"*)
@@ -187,16 +193,16 @@ while true; do
       total_lines=$(wc -l <"$active_file")
       tac "$active_file" >"/tmp/rofi_reversed.txt"
       active_file="/tmp/rofi_reversed.txt" source "$MODULE_DIR/manager.sh" --compile-only
-      env WAYLAND_DISPLAY="$WAYLAND_DISPLAY" DISPLAY="$DISPLAY" XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" mpv --input-ipc-server="/tmp/mpvsocket-$instance_id" "$MPV_UA_OPT" "$MPV_COOKIES" $MPV_OPTS "${mpv_video_flag[@]}" --playlist-start=$((total_lines - line_num)) "/tmp/rofi_mpv_playlist.m3u" >/dev/null 2>&1 &
+      env WAYLAND_DISPLAY="$WAYLAND_DISPLAY" DISPLAY="$DISPLAY" XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" mpv --input-ipc-server="/tmp/mpvsocket-$instance_id" "$MPV_UA_OPT" "$MPV_COOKIES" "${MPV_OPTS[@]}" "${mpv_video_flag[@]}" --playlist-start=$((total_lines - line_num)) "/tmp/rofi_mpv_playlist.m3u" >/dev/null 2>&1 &
       notify-send "Playlist Player" "Loading reversed local playlist..." -i notification-audio-play
       ;;
     *"Play Playlist Shuffled"*)
       source "$MODULE_DIR/manager.sh" --compile-only
-      env WAYLAND_DISPLAY="$WAYLAND_DISPLAY" DISPLAY="$DISPLAY" XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" mpv --input-ipc-server="/tmp/mpvsocket-$instance_id" "$MPV_UA_OPT" "$MPV_COOKIES" $MPV_OPTS "${mpv_video_flag[@]}" --shuffle "/tmp/rofi_mpv_playlist.m3u" >/dev/null 2>&1 &
+      env WAYLAND_DISPLAY="$WAYLAND_DISPLAY" DISPLAY="$DISPLAY" XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" mpv --input-ipc-server="/tmp/mpvsocket-$instance_id" "$MPV_UA_OPT" "$MPV_COOKIES" "${MPV_OPTS[@]}" "${mpv_video_flag[@]}" --shuffle "/tmp/rofi_mpv_playlist.m3u" >/dev/null 2>&1 &
       notify-send "Playlist Player" "Loading randomized local playlist..." -i notification-audio-play
       ;;
     *"Play in New Window"* | *"Play Mix in New Window"*)
-      env WAYLAND_DISPLAY="$WAYLAND_DISPLAY" DISPLAY="$DISPLAY" XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" mpv --input-ipc-server="/tmp/mpvsocket-$instance_id" "$MPV_UA_OPT" "$MPV_COOKIES" $MPV_OPTS "${mpv_video_flag[@]}" "$url" >/dev/null 2>&1 &
+      env WAYLAND_DISPLAY="$WAYLAND_DISPLAY" DISPLAY="$DISPLAY" XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" mpv --input-ipc-server="/tmp/mpvsocket-$instance_id" "$MPV_UA_OPT" "$MPV_COOKIES" "${MPV_OPTS[@]}" "${mpv_video_flag[@]}" "$url" >/dev/null 2>&1 &
       notify-send "YouTube Player" "Opening track window instance" -i notification-audio-play
       ;;
     *"Append to Queue"* | *"Append Mix to Queue"*)
@@ -208,7 +214,7 @@ while true; do
         echo '{"command": ["loadfile", "'"$url"'", "append-play"]}' | socat - UNIX-CONNECT:"$target_socket"
         notify-send "YouTube Queue" "Inserted track to play next!" -i notification-audio-play
       else
-        env WAYLAND_DISPLAY="$WAYLAND_DISPLAY" DISPLAY="$DISPLAY" XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" mpv --input-ipc-server="/tmp/mpvsocket-$instance_id" "$MPV_UA_OPT" "$MPV_COOKIES" $MPV_OPTS "${mpv_video_flag[@]}" "$url" >/dev/null 2>&1 &
+        env WAYLAND_DISPLAY="$WAYLAND_DISPLAY" DISPLAY="$DISPLAY" XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" mpv --input-ipc-server="/tmp/mpvsocket-$instance_id" "$MPV_UA_OPT" "$MPV_COOKIES" "${MPV_OPTS[@]}" "${mpv_video_flag[@]}" "$url" >/dev/null 2>&1 &
         notify-send "YouTube Queue" "Queue empty. Initializing playback engine!" -i notification-audio-play
       fi
       ;;
@@ -217,14 +223,10 @@ while true; do
         rofi_input=""
         declare -A replace_map
         for sock in "${sockets[@]}"; do
-          # SONG ID CONTEXT: Cleanly slices off the raw folder noise
           local short_id
           short_id="${sock##*/mpvsocket-}"
-
-          # Space-agnostic regex fetches the actual YouTube video titles straight from window memory
           title=$(echo '{"command": ["get_property", "media-title"]}' | socat -t 0.3 - UNIX-CONNECT:"$sock" 2>/dev/null | head -n 1 | sed -n 's/.*"data"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
           [ -z "$title" ] && title="Active Media Stream Session"
-
           display_line="🎵 $title (ID: $short_id)"
           rofi_input+="$display_line\n"
           replace_map["$display_line"]="$sock"
