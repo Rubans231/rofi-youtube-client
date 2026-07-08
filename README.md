@@ -29,24 +29,24 @@ Best for Arch Linux environments with custom terminal configurations.
    sudo pacman -S rofi mpv yt-dlp socat libnotify
    ```
 
-## Clone & Setup:
+### Clone & Setup:
 
     git clone [https://github.com/yourusername/rofi-youtube-client.git](https://github.com/yourusername/rofi-youtube-client.git)
     cd rofi-youtube-client
     chmod +x install.sh
     ./install.sh
 
-## Configure Authentication: Export your browser session tokens.
+### Configure Authentication: Export your browser session tokens.
     
     # Place your exported YouTube cookies here:
     ~/.config/yt-dlp/youtube-cookies.txt
 
-## Use:
+### Use:
 
     Launch Menu: Bind your shortcut to ~/.config/hypr/UserScripts/RofiYoutube/core.sh
 
     Sockets: Active IPC tracking available at /tmp/mpvsocket-*
 
-Quick Start (AUR Package)
+## AUR Package
 
 (Coming Soon)
