@@ -1,82 +1,151 @@
 #!/usr/bin/env bash
-# search.sh — Sub-module for query scraping, deep browsing, and unified video actions
+# search.sh — High-speed sub-module featuring Instant Single-Enter Routing & Live Autocomplete
 
-# Hard-ensure matching paths within the subshell scope (Fully portable via $HOME)
+# Hard-ensure matching paths within the subshell scope
 SEARCHED_HIST="$HOME/.cache/RofiYoutube/searched_history.txt"
 ALL_PLAYED_HIST="$HOME/.cache/RofiYoutube/all_played_history.txt"
 PLAYLIST_HIST="$HOME/.cache/RofiYoutube/playlist_history.txt"
 
-query=$("${ROFI_NAV[@]}" -p "YouTube Search" -theme-str 'entry { placeholder: "Type search query (Left Arrow goes Back)..."; }')
-if [ $? -eq 10 ] || [ -z "$query" ]; then
-  return
+mkdir -p "$(dirname "$SEARCHED_HIST")"
+touch "$SEARCHED_HIST"
+
+# Flags to bypass Phase 2 if a direct video/playlist link is selected from history
+bypass_search=false
+url=""
+title_extracted=""
+
+# ==============================================================================
+# PHASE 1: INTERACTIVE TYPING REFRESH LOOP (Single-Enter Instant Routing)
+# ==============================================================================
+query=""
+while true; do
+  # 1. Pull relevant rows from local 100-item FIFO history file
+  local_matches=""
+  if [ -n "$query" ] && [ -s "$SEARCHED_HIST" ]; then
+    local_matches=$(grep -i "$query" "$SEARCHED_HIST" | head -n 3)
+  elif [ -z "$query" ] && [ -s "$SEARCHED_HIST" ]; then
+    local_matches=$(head -n 5 "$SEARCHED_HIST")
+  fi
+
+  # 2. Extract real-time auto-complete string arrays from the YouTube API
+  api_suggestions=""
+  if [ -n "$query" ]; then
+    api_suggestions=$(curl -sG "https://suggestqueries.google.com/complete/search" \
+      --data-urlencode "client=firefox" \
+      --data-urlencode "ds=yt" \
+      --data-urlencode "q=$query" 2>/dev/null |
+      sed 's/\[[^,]*,\s*\[//; s/\].*//; s/"//g; s/,\s*/\n/g' | grep -v -E "^$|^$query$")
+  fi
+
+  # 3. Compile data entries cleanly into the list payload
+  menu_payload=""
+  [ -n "$local_matches" ] && menu_payload+="$local_matches\n"
+  [ -n "$api_suggestions" ] && menu_payload+="$api_suggestions"
+
+  # Pass current text to the filter parameter
+  selection=$(echo -e "$menu_payload" | grep -v '^$' | "${ROFI_NAV[@]}" \
+    -p "Search" \
+    -filter "$query" \
+    -theme-str 'entry { placeholder: "Type query... (Enter runs search instantly, Ctrl+Enter forces exact input)"; }')
+
+  exit_status=$?
+
+  # Strict Interception Gates
+  if [ $exit_status -ne 0 ]; then
+    return # Cancel or back out cleanly
+  fi
+
+  if [ -z "$selection" ]; then
+    break # Fallback for Enter on an empty line
+  elif [ "$selection" == "$query" ]; then
+    # Triggered by Ctrl+Return: Forces exactly what was typed
+    break
+  elif [[ "$selection" == *" ➔ "* ]]; then
+    # SINGLE ENTER ON A CACHED LINK: Extract URL and pass directly to Action Router
+    url=$(echo "$selection" | sed 's/.* ➔ //')
+    title_extracted=$(echo "$selection" | sed 's/ ➔ .*//')
+    bypass_search=true
+    break
+  else
+    # SINGLE ENTER ON SUGGESTION: Instantly set query and break out to run search
+    query="$selection"
+    break
+  fi
+done
+
+final_logged_query="$query"
+
+# ==============================================================================
+# PHASE 2: MAIN HIGH-SPEED DATA SCRAPING PIPELINE (Bypassed if Link Selected)
+# ==============================================================================
+if [ "$bypass_search" = false ]; then
+  search_limit=30
+  while true; do
+    notify-send "Search Engine" "Querying YouTube securely..." -i notification-audio-play
+
+    raw_results=$(yt-dlp "ytsearch$search_limit:$query" \
+      --user-agent "$BROWSER_UA" \
+      --flat-playlist \
+      --print "%(title)s ➔ %(url)s" \
+      --no-warnings \
+      --cache-dir "$HOME/.cache/yt-dlp" \
+      --extractor-args "youtube:search_sort=relevance;player_client=android,web_music" \
+      --check-formats none \
+      --skip-download \
+      2>/dev/null | grep -E '(watch\?v=|/channel/|/c/|/@|playlist\?list=)')
+
+    if [ -z "$raw_results" ]; then
+      notify-send "Search Error" "YouTube rejected scraping or no valid items found." -i notification-message-im
+      return
+    fi
+
+    detected_channels=$(echo -e "$raw_results" | grep -E '(➔ .*\/channel\/|➔ .*\/@|➔ .*\/c\/)')
+    detected_videos=$(echo -e "$raw_results" | grep -v -E '(➔ .*\/channel\/|➔ .*\/@|➔ .*\/c\/)')
+    search_results=$(echo -e "${detected_channels}\n${detected_videos}" | grep -v '^$')
+
+    first_video_url=$(echo -e "$search_results" | grep 'watch?v=' | head -n 1 | sed -n 's/.* ➔ \(http.*\)/\1/p')
+    is_music=false
+
+    if [ -n "$first_video_url" ]; then
+      video_category=$(yt-dlp --user-agent "$BROWSER_UA" --cache-dir "$HOME/.cache/yt-dlp" --check-formats none --skip-download --print "%(categories)s" --no-warnings "$first_video_url" 2>/dev/null | head -n 1)
+      [[ "$video_category" == *"Music"* ]] && is_music=true
+    fi
+
+    if [ "$is_music" = true ]; then
+      seed_video_id=$(echo "$first_video_url" | sed -n 's/.*v=\([A-Za-z0-9_-]\{11\}\).*/\1/p')
+      recommendation_title="✨ [AUTOMIX] Discover ${query} Radio Station"
+      recommendation_url="https://www.youtube.com/watch?v=${seed_video_id}&list=RD${seed_video_id}&start_radio=1"
+      search_results="${recommendation_title} ➔ ${recommendation_url}\n${search_results}"
+    fi
+
+    rofi_titles=$(echo -e "$search_results" | sed 's/ ➔ .*//')
+    total_items=$(echo -e "$search_results" | wc -l)
+
+    if [ "$total_items" -ge "$search_limit" ]; then
+      rofi_menu_data="${rofi_titles}\n🔍 Show more results..."
+    else
+      rofi_menu_data="$rofi_titles"
+    fi
+
+    selected_index=$(echo -e "$rofi_menu_data" | "${ROFI_NAV[@]}" -format i -p "Select Item" -theme-str 'entry { placeholder: "Select track, playlist, or channel..."; }')
+    if [ $? -eq 10 ] || [ -z "$selected_index" ]; then
+      return
+    fi
+
+    if [ "$selected_index" -eq "$total_items" ]; then
+      search_limit=$((search_limit + 30))
+      continue
+    fi
+
+    matched_line=$(echo -e "$search_results" | sed -n "$((selected_index + 1))p")
+    url=$(echo "$matched_line" | sed 's/.* ➔ //')
+    title_extracted=$(echo "$matched_line" | sed 's/ ➔ .*//')
+    break
+  done
 fi
 
 # ==============================================================================
-# MAIN SEARCH PAGINATION LOOP
-# ==============================================================================
-search_limit=30
-while true; do
-  notify-send "Search Engine" "Querying YouTube securely (Fetching $search_limit results)..." -i notification-audio-play
-
-  raw_results=$(yt-dlp "ytsearch$search_limit:$query" \
-    --user-agent "$BROWSER_UA" \
-    --cookies "$COOKIE_PATH" \
-    --flat-playlist \
-    --print "%(title)s ➔ %(url)s" \
-    --no-warnings 2>/dev/null | grep -E '(watch\?v=|/channel/|/c/|/@|playlist\?list=)')
-
-  if [ -z "$raw_results" ]; then
-    notify-send "Search Error" "YouTube rejected scraping or no valid items found." -i notification-message-im
-    return
-  fi
-
-  # Prioritize channels to the absolute top of the menu list
-  detected_channels=$(echo -e "$raw_results" | grep -E '(➔ .*\/channel\/|➔ .*\/@|➔ .*\/c\/)')
-  detected_videos=$(echo -e "$raw_results" | grep -v -E '(➔ .*\/channel\/|➔ .*\/@|➔ .*\/c\/)')
-  search_results=$(echo -e "${detected_channels}\n${detected_videos}" | grep -v '^$')
-
-  first_video_url=$(echo -e "$search_results" | grep 'watch?v=' | head -n 1 | sed -n 's/.* ➔ \(http.*\)/\1/p')
-  is_music=false
-
-  if [ -n "$first_video_url" ]; then
-    video_category=$(yt-dlp --user-agent "$BROWSER_UA" --cookies "$COOKIE_PATH" --print "%(categories)s" --no-warnings "$first_video_url" 2>/dev/null | head -n 1)
-    [[ "$video_category" == *"Music"* ]] && is_music=true
-  fi
-
-  if [ "$is_music" = true ]; then
-    seed_video_id=$(echo "$first_video_url" | sed -n 's/.*v=\([A-Za-z0-9_-]\{11\}\).*/\1/p')
-    recommendation_title="✨ [AUTOMIX] Discover ${query} Radio Station"
-    recommendation_url="https://www.youtube.com/watch?v=${seed_video_id}&list=RD${seed_video_id}&start_radio=1"
-    search_results="${recommendation_title} ➔ ${recommendation_url}\n${search_results}"
-  fi
-
-  rofi_titles=$(echo -e "$search_results" | sed 's/ ➔ .*//')
-  total_items=$(echo -e "$search_results" | wc -l)
-
-  if [ "$total_items" -ge "$search_limit" ]; then
-    rofi_menu_data="${rofi_titles}\n🔍 Show more results..."
-  else
-    rofi_menu_data="$rofi_titles"
-  fi
-
-  selected_index=$(echo -e "$rofi_menu_data" | "${ROFI_NAV[@]}" -format i -p "Select Item" -theme-str 'entry { placeholder: "Select track, playlist, or channel..."; }')
-  if [ $? -eq 10 ] || [ -z "$selected_index" ]; then
-    return
-  fi
-
-  if [ "$selected_index" -eq "$total_items" ]; then
-    search_limit=$((search_limit + 30))
-    continue
-  fi
-
-  matched_line=$(echo -e "$search_results" | sed -n "$((selected_index + 1))p")
-  url=$(echo "$matched_line" | sed 's/.* ➔ //')
-  title_extracted=$(echo "$matched_line" | sed 's/ ➔ .*//')
-  break
-done
-
-# ==============================================================================
-# UNIFIED ROUTER & BACK-TRACKING ENGINE
+# PHASE 3: UNIFIED ROUTER & BACK-TRACKING ENGINE
 # ==============================================================================
 orig_url=""
 orig_title=""
@@ -84,7 +153,7 @@ orig_title=""
 while true; do
   if [[ "$url" == *"/channel/"* ]] || [[ "$url" == *"/@"* ]] || [[ "$url" == *"/c/"* ]]; then
     cat_options="🎥 Latest Uploads\n🩳 Shorts\n🔴 Live Streams\n📁 Playlists"
-    category_choice=$(echo -e "$cat_options" | "${ROFI_NAV[@]}" -p "$title_extracted Tabs" -theme-str 'entry { placeholder: "Select channel tab category (Left Arrow goes Back)..."; }')
+    category_choice=$(echo -e "$cat_options" | "${ROFI_NAV[@]}" -p "$title_extracted Tabs" -theme-str 'entry { placeholder: "Select channel tab category..."; }')
 
     if [ $? -eq 10 ] || [ -z "$category_choice" ]; then
       if [ -n "$orig_url" ]; then
@@ -116,11 +185,14 @@ while true; do
 
       channel_raw=$(yt-dlp "$target_browse_url" \
         --user-agent "$BROWSER_UA" \
-        --cookies "$COOKIE_PATH" \
         --flat-playlist \
         --playlist-end "$channel_limit" \
         --print "%(title)s ➔ %(url)s" \
-        --no-warnings 2>/dev/null)
+        --no-warnings \
+        --cache-dir "$HOME/.cache/yt-dlp" \
+        --check-formats none \
+        --skip-download \
+        2>/dev/null)
 
       if [ -z "$channel_raw" ]; then
         notify-send "Browser Error" "No items found inside the $category_choice tab directory." -i notification-message-im
@@ -136,7 +208,7 @@ while true; do
         channel_menu_data="$channel_titles"
       fi
 
-      selected_ch_index=$(echo -e "$channel_menu_data" | "${ROFI_NAV[@]}" -format i -p "$title_extracted" -theme-str 'entry { placeholder: "Select item to play (Left Arrow returns to tabs)..."; }')
+      selected_ch_index=$(echo -e "$channel_menu_data" | "${ROFI_NAV[@]}" -format i -p "$title_extracted" -theme-str 'entry { placeholder: "Select item to play..."; }')
 
       if [ $? -eq 10 ] || [ -z "$selected_ch_index" ]; then
         inner_back=true
@@ -151,8 +223,6 @@ while true; do
       matched_line=$(echo -e "$channel_raw" | sed -n "$((selected_ch_index + 1))p")
       url=$(echo "$matched_line" | sed 's/.* ➔ //')
       title_extracted=$(echo "$matched_line" | sed 's/ ➔ .*//')
-
-      # FIXED: Changed from break 2 to a standard break. Exits the list view and drops directly into the action menu down below.
       break
     done
 
@@ -178,7 +248,7 @@ while true; do
 
   if [[ "$choice" == *"Visit Channel"* ]]; then
     notify-send "Channel Browser" "Resolving channel profile link..." -i notification-audio-play
-    channel_info=$(yt-dlp --print "%(uploader)s ➔ %(channel_url)s" --no-warnings "$url" 2>/dev/null | head -n 1)
+    channel_info=$(yt-dlp --cache-dir "$HOME/.cache/yt-dlp" --check-formats none --skip-download --print "%(uploader)s ➔ %(channel_url)s" --no-warnings "$url" 2>/dev/null | head -n 1)
     if [ -n "$channel_info" ]; then
       orig_url="$url"
       orig_title="$title_extracted"
@@ -202,7 +272,7 @@ while true; do
     return
   elif [[ "$choice" == *"Download Video"* ]]; then
     notify-send "Downloader" "Starting background download to ~/Downloads..." -i notification-audio-play
-    yt-dlp --user-agent "$BROWSER_UA" --cookies "$COOKIE_PATH" -P "$HOME/Downloads" "$url" &
+    yt-dlp --user-agent "$BROWSER_UA" --cache-dir "$HOME/.cache/yt-dlp" -P "$HOME/Downloads" "$url" &
     url=""
     return
   else
@@ -211,9 +281,14 @@ while true; do
 done
 
 # ==============================================================================
-# HISTORICAL ENGINE TRACKING LOGSET
+# PHASE 4: HISTORICAL LOGGING & STRICT 100-ITEM FIFO TRUNCATION
 # ==============================================================================
 if [ -n "$url" ]; then
+  tmp_searched=$(mktemp)
+  grep -v -x -F "$final_logged_query" "$SEARCHED_HIST" >"$tmp_searched" 2>/dev/null
+  echo "$final_logged_query" | cat - "$tmp_searched" | head -n 100 >"$SEARCHED_HIST"
+  rm -f "$tmp_searched"
+
   if [[ "$title_extracted" == *"[AUTOMIX]"* ]]; then
     first_title=$(echo -e "$raw_results" | head -n 1 | sed 's/ ➔ .*//')
     log_video_history "search" "$first_video_url" "$first_title"
