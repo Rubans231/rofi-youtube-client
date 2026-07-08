@@ -6,7 +6,7 @@ if [ "$1" == "--compile-only" ]; then
   echo "#EXTM3U" >"/tmp/rofi_mpv_playlist.m3u"
   while IFS= read -r line; do
     [ -z "$line" ] && continue
-    echo "#EXTINF:-1,$(echo "$line" | sed 's/ ➔ .*//' | sed 's/^\[PIN\] //')" >>"/tmp/rofi_mpv_playlist.m3u"
+    echo "#EXTINF:-1,$(echo "$line" | sed 's/ ➔ .*//' | sed 's/^📌 //')" >>"/tmp/rofi_mpv_playlist.m3u"
     echo "$line" | sed 's/.* ➔ //' >>"/tmp/rofi_mpv_playlist.m3u"
   done <"$active_file"
   return 0
@@ -31,14 +31,19 @@ if [ -n "$active_file" ]; then
     [ $? -eq 10 ] || [ -z "$choice" ] && continue
 
     url=$(echo "$selected_video" | sed 's/.* ➔ //')
-    title_part=$(echo "$selected_video" | sed 's/ ➔ .*//' | sed 's/^\[PIN\] //')
+    title_part=$(echo "$selected_video" | sed 's/ ➔ .*//' | sed 's/^📌 //')
 
     if [[ "$choice" == *"Pin / Unpin Item"* ]]; then
-      [[ "$selected_video" == "\[PIN\] "* ]] && new_line=$(echo "$selected_video" | sed 's/^\[PIN\] //') || new_line="[PIN] $selected_video"
+      # Swapped conditional match pattern to use the pin emoji
+      if [[ "$selected_video" == "📌 "* ]]; then
+        new_line=$(echo "$selected_video" | sed 's/^📌 //')
+      else
+        new_line="📌 $selected_video"
+      fi
       awk -v old="$selected_video" -v new="$new_line" '{if ($0 == old) print new; else print}' "$active_file" >"$HISTORY_DIR/tmp" && mv "$HISTORY_DIR/tmp" "$active_file"
       (
-        grep '^\[PIN\]' "$active_file"
-        grep -v '^\[PIN\]' "$active_file"
+        grep '^📌' "$active_file"
+        grep -v '^📌' "$active_file"
       ) >"$HISTORY_DIR/tmp_sort" && mv "$HISTORY_DIR/tmp_sort" "$active_file"
     elif [[ "$choice" == *"Remove From"* ]]; then
       grep -v -F "$selected_video" "$active_file" >"$HISTORY_DIR/tmp" && mv "$HISTORY_DIR/tmp" "$active_file"
@@ -87,11 +92,16 @@ while true; do
     mix_url=$(echo "$selected_line" | sed 's/.* ➔ //')
 
     if [[ "$choice" == *"Pin / Unpin Playlist"* ]]; then
-      [[ "$selected_line" == "\[PIN\] "* ]] && new_line=$(echo "$selected_line" | sed 's/^\[PIN\] //') || new_line="[PIN] $selected_line"
+      # Swapped conditional match pattern for playlist arrays to use the pin emoji
+      if [[ "$selected_line" == "📌 "* ]]; then
+        new_line=$(echo "$selected_line" | sed 's/^📌 //')
+      else
+        new_line="📌 $selected_line"
+      fi
       awk -v old="$selected_line" -v new="$new_line" '{if ($0 == old) print new; else print}' "$PLAYLIST_HIST" >"$HISTORY_DIR/tmp" && mv "$HISTORY_DIR/tmp" "$PLAYLIST_HIST"
       (
-        grep '^\[PIN\]' "$PLAYLIST_HIST"
-        grep -v '^\[PIN\]' "$PLAYLIST_HIST"
+        grep '^📌' "$PLAYLIST_HIST"
+        grep -v '^📌' "$PLAYLIST_HIST"
       ) >"$HISTORY_DIR/tmp_sort" && mv "$HISTORY_DIR/tmp_sort" "$PLAYLIST_HIST"
     elif [[ "$choice" == *"Remove Playlist"* ]]; then
       grep -v -F "$selected_line" "$PLAYLIST_HIST" >"$HISTORY_DIR/tmp" && mv "$HISTORY_DIR/tmp" "$PLAYLIST_HIST"
@@ -99,7 +109,7 @@ while true; do
       line_num=$(grep -n -F "$selected_line" "$PLAYLIST_HIST" | head -n1 | cut -d: -f1)
       total_lines=$(wc -l <"$PLAYLIST_HIST")
       if [[ "$choice" == *"Move Line Up"* && $line_num -gt 1 ]]; then
-        awk -v l1="$!((line_num - 1))" -v l2="$line_num" 'NR==l1 {l1_text=$0; next} NR==l2 {print $0; print l1_text; next} {print}' "$PLAYLIST_HIST" >"$HISTORY_DIR/tmp" && mv "$HISTORY_DIR/tmp" "$PLAYLIST_HIST"
+        awk -v l1="$((line_num - 1))" -v l2="$line_num" 'NR==l1 {l1_text=$0; next} NR==l2 {print $0; print l1_text; next} {print}' "$PLAYLIST_HIST" >"$HISTORY_DIR/tmp" && mv "$HISTORY_DIR/tmp" "$PLAYLIST_HIST"
       elif [[ "$choice" == *"Move Line Down"* && $line_num -lt $total_lines ]]; then
         awk -v l1="$line_num" -v l2="$((line_num + 1))" 'NR==l1 {l1_text=$0; next} NR==l2 {print $0; print l1_text; next} {print}' "$PLAYLIST_HIST" >"$HISTORY_DIR/tmp" && mv "$HISTORY_DIR/tmp" "$PLAYLIST_HIST"
       fi
@@ -120,8 +130,8 @@ while true; do
     [ $? -eq 10 ] || [ -z "$playlist_name" ] && continue
     echo "$playlist_name ➔ $mix_url" | cat - "$PLAYLIST_HIST" >"$HISTORY_DIR/tmp_hist" && mv "$HISTORY_DIR/tmp_hist" "$PLAYLIST_HIST"
     (
-      grep '^\[PIN\]' "$PLAYLIST_HIST"
-      grep -v '^\[PIN\]' "$PLAYLIST_HIST"
+      grep '^📌' "$PLAYLIST_HIST"
+      grep -v '^📌' "$PLAYLIST_HIST"
     ) >"$HISTORY_DIR/tmp_sort" && mv "$HISTORY_DIR/tmp_sort" "$PLAYLIST_HIST"
     url="$mix_url" && choice="Play in New Window" && return
   elif [[ "$mix_choice" == *"Manual Playlists"* ]]; then

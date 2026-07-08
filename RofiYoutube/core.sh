@@ -1,10 +1,8 @@
 #!/usr/bin/env bash
 
 #TO DO;
-#BRING BACK THE SESSION SELECT FOR CHOSING WITH SESSION TO REPLACE
 #ADD A SEARCH HISTORY FEATURE WHEN IN YOUTUBE SEARCH
 #A SEARCH RECOMMEND FEATURE WHEN SEARCHING FOR SMTH
-#FIX THE PIN!!!
 
 # ==============================================================================
 # ATOMIC CONCURRENCY LOCK ENGINE (Anti-Spam Shield)
@@ -141,15 +139,15 @@ while true; do
     MPV_UA_OPT="--user-agent=$BROWSER_UA"
     MPV_COOKIES="--cookies-file=$COOKIE_PATH"
 
-    # FIXED: Hardened Array architecture forces background lookahead and RAM pre-caching options cleanly
+    # Restored to baseline optimization array definitions
     MPV_OPTS=(
-      "--ytdl-raw-options=format=$YTDL_FORMAT"
       "--prefetch-playlist=yes"
       "--cache=yes"
       "--cache-secs=300"
       "--demuxer-readahead-secs=60"
       "--demuxer-max-bytes=500MiB"
       "--demuxer-max-back-bytes=100MiB"
+      "--ytdl-raw-options=cache-dir=$HOME/.cache/yt-dlp,format=$YTDL_FORMAT"
     )
 
     # --------------------------------------------------------------------------
@@ -202,6 +200,7 @@ while true; do
       notify-send "Playlist Player" "Loading randomized local playlist..." -i notification-audio-play
       ;;
     *"Play in New Window"* | *"Play Mix in New Window"*)
+      # RESTORED: Passes raw standalone URL link parameters with zero M3U array modifications
       env WAYLAND_DISPLAY="$WAYLAND_DISPLAY" DISPLAY="$DISPLAY" XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" mpv --input-ipc-server="/tmp/mpvsocket-$instance_id" "$MPV_UA_OPT" "$MPV_COOKIES" "${MPV_OPTS[@]}" "${mpv_video_flag[@]}" "$url" >/dev/null 2>&1 &
       notify-send "YouTube Player" "Opening track window instance" -i notification-audio-play
       ;;
