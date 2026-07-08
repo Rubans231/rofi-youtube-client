@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 # search.sh — Sub-module for query scraping and category verification
 
+# Hard-ensure matching paths within the subshell scope
+SEARCHED_HIST="$HOME/.cache/RofiYoutube/searched_history.txt"
+ALL_PLAYED_HIST="$HOME/.cache/RofiYoutube/all_played_history.txt"
+PLAYLIST_HIST="$HOME/.cache/RofiYoutube/playlist_history.txt"
+
 query=$("${ROFI_NAV[@]}" -p "YouTube Search" -theme-str 'entry { placeholder: "Type search query (Left Arrow goes Back)..."; }')
 [ $? -eq 10 ] || [ -z "$query" ] && return
 
@@ -35,14 +40,14 @@ else
   search_results="$raw_results"
 fi
 
-rofi_titles=$(echo -e "$search_results" | sed 's/ ➔ .*//' | sed 's/【/[/g; s/】/]/g; s/^[[:space:]]*//;s/[[:space:]]*$//')
+rofi_titles=$(echo -e "$search_results" | sed 's/ ➔ .*//' | sed 's/【/[/g; s/】/]/g; s/ //g; s/^[[:space:]]*//;s/[[:space:]]*$//')
 
 selected_index=$(echo -e "$rofi_titles" | "${ROFI_NAV[@]}" -format i -p "Select Item" -theme-str 'entry { placeholder: "Select track or link (Left Arrow goes Back)..."; }')
 [ $? -eq 10 ] || [ -z "$selected_index" ] && return
 
 matched_line=$(echo -e "$search_results" | sed -n "$((selected_index + 1))p")
 url=$(echo "$matched_line" | sed 's/.* ➔ //')
-title_extracted=$(echo "$matched_line" | sed 's/ ➔ .*//' | sed 's/【/[/g; s/】/]/g; s/^[[:space:]]*//;s/[[:space:]]*$//')
+title_extracted=$(echo "$matched_line" | sed 's/ ➔ .*//' | sed 's/【/[/g; s/】/]/g; s/ //g; s/^[[:space:]]*//;s/[[:space:]]*$//')
 
 if [[ "$title_extracted" == *"[AUTOMIX]"* ]]; then
   options="Play Mix in New Window\nPlay Mix Next (Queue)\nAppend Mix to Queue\nReplace Active Session"
@@ -56,7 +61,7 @@ choice=$(echo -e "$options" | "${ROFI_NAV[@]}" -p "Video Action" -theme-str 'ent
   return
 }
 
-# Intercept database storage options immediately
+# Intercept configuration options instantly
 if [[ "$choice" == *"Save to Liked Videos"* ]]; then
   log_video_history "liked" "$url" "$title_extracted"
   notify-send "Liked Videos" "Saved to favorites vault!" -i notification-audio-play
@@ -70,7 +75,23 @@ elif [[ "$choice" == *"Download Video"* ]]; then
   url=""
 fi
 
-if [[ "$title_extracted" != *"[AUTOMIX]"* && -n "$url" ]]; then
-  log_video_history "search" "$url" "$title_extracted" &
-  log_video_history "all" "$url" "$title_extracted" &
+# ==============================================================================
+# SEED INTERCEPTION LOGSET: Captures both the standalone song and the full dynamic playlist
+# ==============================================================================
+if [ -n "$url" ]; then
+  if [[ "$title_extracted" == *"[AUTOMIX]"* ]]; then
+    # 1. Store the standalone base video track information to history logs
+    first_title=$(echo -e "$raw_results" | head -n 1 | sed 's/ ➔ .*//' | sed 's/【/[/g; s/】/]/g; s/ //g; s/^[[:space:]]*//;s/[[:space:]]*$//')
+    log_video_history "search" "$first_video_url" "$first_title"
+    log_video_history "all" "$first_video_url" "$first_title"
+
+    # 2. Add the dynamic custom radio mix URL directly to Saved Playlists Mixes
+    clean_mix_title="${query} Automix Station"
+    if ! grep -qF "$recommendation_url" "$PLAYLIST_HIST"; then
+      echo "$clean_mix_title ➔ $recommendation_url" | cat - "$PLAYLIST_HIST" >"${PLAYLIST_HIST}.tmp" && mv "${PLAYLIST_HIST}.tmp" "$PLAYLIST_HIST"
+    fi
+  else
+    log_video_history "search" "$url" "$title_extracted"
+    log_video_history "all" "$url" "$title_extracted"
+  fi
 fi
