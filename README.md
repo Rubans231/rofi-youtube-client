@@ -23,29 +23,39 @@ A lightweight, terminal-centric media workflow designed for Arch Linux. It combi
 
 Best for Arch Linux environments with custom terminal configurations.
 
-1. **Install Prerequisites**:
+### 1. **Install Prerequisites**:
 
    ```bash
    sudo pacman -S rofi mpv yt-dlp socat libnotify
    ```
 
-### Clone & Setup:
+### 2. Clone & Setup:
 
-    git clone [https://github.com/yourusername/rofi-youtube-client.git](https://github.com/yourusername/rofi-youtube-client.git)
+    git clone https://github.com/Rubans231/rofi-youtube-client.git
     cd rofi-youtube-client
     chmod +x install.sh
     ./install.sh
 
-### Configure Authentication: Export your browser session tokens.
-    
-    # Place your exported YouTube cookies here:
-    ~/.config/yt-dlp/youtube-cookies.txt
+### 3. Configure Authentication (Cookie Export)
+
+To prevent YouTube from triggering anti-bot verification challenges and to also get recommendation benefits along with mark watched features, you must export a valid session cookie from your browser:
+
+   - Install an open-source cookie extraction extension in your browser (e.g., Get cookies.txt LOCALLY for Chromium/Firefox).
+
+   - Open your browser, navigate to YouTube, and ensure you are completely logged into your account.
+
+   - Click the extension icon and download the cookies for youtube.com in the standard Netscape cookies format.
+
+   - Rename the downloaded file to youtube-cookies.txt and move it to your configuration directory:
+
+    mkdir -p ~/.config/yt-dlp
+    mv ~/Downloads/youtube-cookies.txt ~/.config/yt-dlp/youtube-cookies.txt
 
 ### Use:
 
-    Launch Menu: Bind your shortcut to ~/.config/hypr/UserScripts/RofiYoutube/core.sh
+   Launch Menu: Bind your shortcut to ~/.config/hypr/UserScripts/RofiYoutube/core.sh
 
-    Sockets: Active IPC tracking available at /tmp/mpvsocket-*
+   Sockets: Active IPC tracking available at /tmp/mpvsocket-*
 
 ## AUR Package
 
