@@ -6,6 +6,8 @@
 #A SEARCH RECOMMEND FEATURE WHEN SEARCHING FOR SMTH
 #FIX THE PIN!!!
 
+#!/usr/bin/env bash
+
 # ==============================================================================
 # ATOMIC CONCURRENCY LOCK ENGINE (Anti-Spam Shield)
 # ==============================================================================
@@ -32,8 +34,8 @@ export LIKED_HIST="$HISTORY_DIR/liked_history.txt"
 export MANUAL_PL_DIR="$HISTORY_DIR/manual_playlists"
 export VIDEO_MODE_FILE="$HISTORY_DIR/video_mode.txt"
 
-# Exact environmental dependencies configurations
-export BROWSER_UA="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, Gecko) Chrome/120.0.0.0 Safari/537.36"
+# Exact environmental dependencies configurations (Strict Zen Browser Alignment)
+export BROWSER_UA="Mozilla/5.0 (X11; Linux x86_64; rv:152.0) Gecko/20100101 Firefox/152.0"
 export COOKIE_PATH="$HOME/.config/yt-dlp/youtube-cookies.txt"
 
 mkdir -p "$HISTORY_DIR" "$MANUAL_PL_DIR"
@@ -84,7 +86,6 @@ export -f log_video_history 2>/dev/null || true
 
 # Main Global Dispatcher Loop
 while true; do
-  # Reset variables at the beginning of each cycle loop to prevent data leakage
   url=""
   choice=""
   selected_video=""
@@ -92,7 +93,6 @@ while true; do
   main_options="Search YouTube\nPlaylist & Mix Manager\nVideo History Vault\nPlaylist Config"
   main_choice=$(echo -e "$main_options" | "${ROFI_NAV[@]}" -p "YouTube Menu" -theme-str 'entry { placeholder: "Choose YouTube Mode..."; }')
 
-  # Terminate loop strictly when the user cancels out via Escape/Rofi cancellation
   if [ $? -eq 10 ] || [ -z "$main_choice" ]; then exit 0; fi
 
   case "$main_choice" in
@@ -132,7 +132,6 @@ while true; do
       kill -0 "${sock##*-}" 2>/dev/null && sockets+=("$sock") || rm -f "$sock"
     done
 
-    # Dynamic Array Engine initialization
     mpv_video_flag=()
     if [ "$(cat "$VIDEO_MODE_FILE" 2>/dev/null)" == "audio" ]; then
       mpv_video_flag=("--no-video")
@@ -144,12 +143,13 @@ while true; do
 
     MPV_UA_OPT="--user-agent=$BROWSER_UA"
 
-    # FIXED: Single unified options string passing to prevent parameter dropping
-    MPV_COOKIES="--ytdl-raw-options=yes-playlist=,cookies=$COOKIE_PATH,mark-watched=,format=$YTDL_FORMAT"
+    # Verified options pipeline format
+    MPV_COOKIES="--cookies-file=$COOKIE_PATH"
+    MPV_OPTS="--ytdl-raw-options=yes-playlist=,format=$YTDL_FORMAT,cookies=$COOKIE_PATH --ytdl-raw-options-append=mark-watched="
 
     if [ ${#sockets[@]} -eq 0 ] && [[ "$choice" == *"Append"* || "$choice" == *"Play Next"* || "$choice" == *"Replace"* ]]; then
       notify-send "YouTube Error" "No active session found! Opening separately." -i notification-message-im
-      setsid env WAYLAND_DISPLAY="$WAYLAND_DISPLAY" DISPLAY="$DISPLAY" mpv --input-ipc-server="/tmp/mpvsocket-$$" "$MPV_UA_OPT" "$MPV_COOKIES" "${mpv_video_flag[@]}" "$url" >/dev/null 2>&1 &
+      setsid env WAYLAND_DISPLAY="$WAYLAND_DISPLAY" DISPLAY="$DISPLAY" mpv --input-ipc-server="/tmp/mpvsocket-$$" "$MPV_UA_OPT" "$MPV_COOKIES" $MPV_OPTS "${mpv_video_flag[@]}" "$url" >/dev/null 2>&1 &
       continue
     elif [ ${#sockets[@]} -eq 1 ]; then
       target_socket="${sockets[0]}"
@@ -172,7 +172,7 @@ while true; do
     *"Play Selected Playlist Here"*)
       line_num=$(grep -n -F "$selected_video" "$active_file" | head -n1 | cut -d: -f1)
       source "$MODULE_DIR/manager.sh" --compile-only
-      setsid env WAYLAND_DISPLAY="$WAYLAND_DISPLAY" DISPLAY="$DISPLAY" mpv --input-ipc-server="/tmp/mpvsocket-$$" "$MPV_UA_OPT" "$MPV_COOKIES" "${mpv_video_flag[@]}" --playlist-start=$((line_num - 1)) "/tmp/rofi_mpv_playlist.m3u" >/dev/null 2>&1 &
+      setsid env WAYLAND_DISPLAY="$WAYLAND_DISPLAY" DISPLAY="$DISPLAY" mpv --input-ipc-server="/tmp/mpvsocket-$$" "$MPV_UA_OPT" "$MPV_COOKIES" $MPV_OPTS "${mpv_video_flag[@]}" --playlist-start=$((line_num - 1)) "/tmp/rofi_mpv_playlist.m3u" >/dev/null 2>&1 &
       notify-send "Playlist Player" "Loading local playlist..." -i notification-audio-play
       ;;
     *"Play Playlist in Reverse"*)
@@ -180,17 +180,16 @@ while true; do
       total_lines=$(wc -l <"$active_file")
       tac "$active_file" >"/tmp/rofi_reversed.txt"
       active_file="/tmp/rofi_reversed.txt" source "$MODULE_DIR/manager.sh" --compile-only
-      setsid env WAYLAND_DISPLAY="$WAYLAND_DISPLAY" DISPLAY="$DISPLAY" mpv --input-ipc-server="/tmp/mpvsocket-$$" "$MPV_UA_OPT" "$MPV_COOKIES" "${mpv_video_flag[@]}" --playlist-start=$((total_lines - line_num)) "/tmp/rofi_mpv_playlist.m3u" >/dev/null 2>&1 &
+      setsid env WAYLAND_DISPLAY="$WAYLAND_DISPLAY" DISPLAY="$DISPLAY" mpv --input-ipc-server="/tmp/mpvsocket-$$" "$MPV_UA_OPT" "$MPV_COOKIES" $MPV_OPTS "${mpv_video_flag[@]}" --playlist-start=$((total_lines - line_num)) "/tmp/rofi_mpv_playlist.m3u" >/dev/null 2>&1 &
       notify-send "Playlist Player" "Loading reversed local playlist..." -i notification-audio-play
       ;;
     *"Play Playlist Shuffled"*)
       source "$MODULE_DIR/manager.sh" --compile-only
-      setsid env WAYLAND_DISPLAY="$WAYLAND_DISPLAY" DISPLAY="$DISPLAY" mpv --input-ipc-server="/tmp/mpvsocket-$$" "$MPV_UA_OPT" "$MPV_COOKIES" "${mpv_video_flag[@]}" --shuffle "/tmp/rofi_mpv_playlist.m3u" >/dev/null 2>&1 &
+      setsid env WAYLAND_DISPLAY="$WAYLAND_DISPLAY" DISPLAY="$DISPLAY" mpv --input-ipc-server="/tmp/mpvsocket-$$" "$MPV_UA_OPT" "$MPV_COOKIES" $MPV_OPTS "${mpv_video_flag[@]}" --shuffle "/tmp/rofi_mpv_playlist.m3u" >/dev/null 2>&1 &
       notify-send "Playlist Player" "Loading randomized local playlist..." -i notification-audio-play
       ;;
     *"Play in New Window"* | *"Play Mix in New Window"*)
-      # FIXED: Hard double-quotes added around "$url" to tightly contain ampersands
-      setsid env WAYLAND_DISPLAY="$WAYLAND_DISPLAY" DISPLAY="$DISPLAY" mpv --input-ipc-server="/tmp/mpvsocket-$$" "$MPV_UA_OPT" "$MPV_COOKIES" "${mpv_video_flag[@]}" "$url" >/dev/null 2>&1 &
+      setsid env WAYLAND_DISPLAY="$WAYLAND_DISPLAY" DISPLAY="$DISPLAY" mpv --input-ipc-server="/tmp/mpvsocket-$$" "$MPV_UA_OPT" "$MPV_COOKIES" $MPV_OPTS "${mpv_video_flag[@]}" "$url" >/dev/null 2>&1 &
       notify-send "YouTube Player" "Opening track window instance" -i notification-audio-play
       ;;
     *"Append to Queue"* | *"Append Mix to Queue"*)
@@ -202,7 +201,7 @@ while true; do
         echo '{"command": ["loadfile", "'"$url"'", "append-play"]}' | socat - UNIX-CONNECT:"$target_socket"
         notify-send "YouTube Queue" "Inserted track to play next!" -i notification-audio-play
       else
-        setsid env WAYLAND_DISPLAY="$WAYLAND_DISPLAY" DISPLAY="$DISPLAY" mpv --input-ipc-server="/tmp/mpvsocket-$$" "$MPV_UA_OPT" "$MPV_COOKIES" "${mpv_video_flag[@]}" "$url" >/dev/null 2>&1 &
+        setsid env WAYLAND_DISPLAY="$WAYLAND_DISPLAY" DISPLAY="$DISPLAY" mpv --input-ipc-server="/tmp/mpvsocket-$$" "$MPV_UA_OPT" "$MPV_COOKIES" $MPV_OPTS "${mpv_video_flag[@]}" "$url" >/dev/null 2>&1 &
         notify-send "YouTube Queue" "Queue empty. Initializing playback engine!" -i notification-audio-play
       fi
       ;;
