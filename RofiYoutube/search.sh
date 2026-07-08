@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# search.sh — High-speed sub-module featuring FIFO History & Live Autocomplete with Native Ctrl+Return
+# search.sh — High-speed sub-module featuring Instant Single-Enter Routing & Live Autocomplete
 
 # Hard-ensure matching paths within the subshell scope
 SEARCHED_HIST="$HOME/.cache/RofiYoutube/searched_history.txt"
@@ -9,8 +9,13 @@ PLAYLIST_HIST="$HOME/.cache/RofiYoutube/playlist_history.txt"
 mkdir -p "$(dirname "$SEARCHED_HIST")"
 touch "$SEARCHED_HIST"
 
+# Flags to bypass Phase 2 if a direct video/playlist link is selected from history
+bypass_search=false
+url=""
+title_extracted=""
+
 # ==============================================================================
-# PHASE 1: INTERACTIVE TYPING REFRESH LOOP (Native Ctrl+Return Behavior)
+# PHASE 1: INTERACTIVE TYPING REFRESH LOOP (Single-Enter Instant Routing)
 # ==============================================================================
 query=""
 while true; do
@@ -41,97 +46,103 @@ while true; do
   selection=$(echo -e "$menu_payload" | grep -v '^$' | "${ROFI_NAV[@]}" \
     -p "Search" \
     -filter "$query" \
-    -theme-str 'entry { placeholder: "Type query... (Press Ctrl+Enter to search exact text immediately)"; }')
+    -theme-str 'entry { placeholder: "Type query... (Enter runs search instantly, Ctrl+Enter forces exact input)"; }')
 
   exit_status=$?
 
-  # 4. Strict Interception Gates
+  # Strict Interception Gates
   if [ $exit_status -ne 0 ]; then
-    # Catches ESC (1), Left Arrow Back (10), or any external termination signal -> abort instantly!
-    return
+    return # Cancel or back out cleanly
   fi
 
   if [ -z "$selection" ]; then
     break # Fallback for Enter on an empty line
   elif [ "$selection" == "$query" ]; then
-    # NATURALLY TRIGGERED BY CTRL+RETURN:
-    # Forces Rofi to submit the raw input string exactly, matching this condition perfectly!
+    # Triggered by Ctrl+Return: Forces exactly what was typed
+    break
+  elif [[ "$selection" == *" ➔ "* ]]; then
+    # SINGLE ENTER ON A CACHED LINK: Extract URL and pass directly to Action Router
+    url=$(echo "$selection" | sed 's/.* ➔ //')
+    title_extracted=$(echo "$selection" | sed 's/ ➔ .*//')
+    bypass_search=true
     break
   else
-    # User selected an autocomplete item row, update state and loop back
+    # SINGLE ENTER ON SUGGESTION: Instantly set query and break out to run search
     query="$selection"
-    continue
+    break
   fi
 done
 
 final_logged_query="$query"
 
 # ==============================================================================
-# PHASE 2: MAIN HIGH-SPEED DATA SCRAPING PIPELINE (Android Client)
+# PHASE 2: MAIN HIGH-SPEED DATA SCRAPING PIPELINE (Bypassed if Link Selected)
 # ==============================================================================
-search_limit=30
-while true; do
-  notify-send "Search Engine" "Querying YouTube securely..." -i notification-audio-play
+if [ "$bypass_search" = false ]; then
+  search_limit=30
+  while true; do
+    notify-send "Search Engine" "Querying YouTube securely..." -i notification-audio-play
 
-  raw_results=$(yt-dlp "ytsearch$search_limit:$query" \
-    --user-agent "$BROWSER_UA" \
-    --flat-playlist \
-    --print "%(title)s ➔ %(url)s" \
-    --no-warnings \
-    --cache-dir "$HOME/.cache/yt-dlp" \
-    --extractor-args "youtube:search_sort=relevance;player_client=android,web_music" \
-    --check-formats none \
-    --skip-download \
-    2>/dev/null | grep -E '(watch\?v=|/channel/|/c/|/@|playlist\?list=)')
+    raw_results=$(yt-dlp "ytsearch$search_limit:$query" \
+      --user-agent "$BROWSER_UA" \
+      --flat-playlist \
+      --print "%(title)s ➔ %(url)s" \
+      --no-warnings \
+      --cache-dir "$HOME/.cache/yt-dlp" \
+      --extractor-args "youtube:search_sort=relevance;player_client=android,web_music" \
+      --check-formats none \
+      --skip-download \
+      2>/dev/null | grep -E '(watch\?v=|/channel/|/c/|/@|playlist\?list=)')
 
-  if [ -z "$raw_results" ]; then
-    notify-send "Search Error" "YouTube rejected scraping or no valid items found." -i notification-message-im
-    return
-  fi
+    if [ -z "$raw_results" ]; then
+      notify-send "Search Error" "YouTube rejected scraping or no valid items found." -i notification-message-im
+      return
+    fi
 
-  detected_channels=$(echo -e "$raw_results" | grep -E '(➔ .*\/channel\/|➔ .*\/@|➔ .*\/c\/)')
-  detected_videos=$(echo -e "$raw_results" | grep -v -E '(➔ .*\/channel\/|➔ .*\/@|➔ .*\/c\/)')
-  search_results=$(echo -e "${detected_channels}\n${detected_videos}" | grep -v '^$')
+    detected_channels=$(echo -e "$raw_results" | grep -E '(➔ .*\/channel\/|➔ .*\/@|➔ .*\/c\/)')
+    detected_videos=$(echo -e "$raw_results" | grep -v -E '(➔ .*\/channel\/|➔ .*\/@|➔ .*\/c\/)')
+    search_results=$(echo -e "${detected_channels}\n${detected_videos}" | grep -v '^$')
 
-  first_video_url=$(echo -e "$search_results" | grep 'watch?v=' | head -n 1 | sed -n 's/.* ➔ \(http.*\)/\1/p')
-  is_music=false
+    first_video_url=$(echo -e "$search_results" | grep 'watch?v=' | head -n 1 | sed -n 's/.* ➔ \(http.*\)/\1/p')
+    is_music=false
 
-  if [ -n "$first_video_url" ]; then
-    video_category=$(yt-dlp --user-agent "$BROWSER_UA" --cache-dir "$HOME/.cache/yt-dlp" --check-formats none --skip-download --print "%(categories)s" --no-warnings "$first_video_url" 2>/dev/null | head -n 1)
-    [[ "$video_category" == *"Music"* ]] && is_music=true
-  fi
+    if [ -n "$first_video_url" ]; then
+      video_category=$(yt-dlp --user-agent "$BROWSER_UA" --cache-dir "$HOME/.cache/yt-dlp" --check-formats none --skip-download --print "%(categories)s" --no-warnings "$first_video_url" 2>/dev/null | head -n 1)
+      [[ "$video_category" == *"Music"* ]] && is_music=true
+    fi
 
-  if [ "$is_music" = true ]; then
-    seed_video_id=$(echo "$first_video_url" | sed -n 's/.*v=\([A-Za-z0-9_-]\{11\}\).*/\1/p')
-    recommendation_title="✨ [AUTOMIX] Discover ${query} Radio Station"
-    recommendation_url="https://www.youtube.com/watch?v=${seed_video_id}&list=RD${seed_video_id}&start_radio=1"
-    search_results="${recommendation_title} ➔ ${recommendation_url}\n${search_results}"
-  fi
+    if [ "$is_music" = true ]; then
+      seed_video_id=$(echo "$first_video_url" | sed -n 's/.*v=\([A-Za-z0-9_-]\{11\}\).*/\1/p')
+      recommendation_title="✨ [AUTOMIX] Discover ${query} Radio Station"
+      recommendation_url="https://www.youtube.com/watch?v=${seed_video_id}&list=RD${seed_video_id}&start_radio=1"
+      search_results="${recommendation_title} ➔ ${recommendation_url}\n${search_results}"
+    fi
 
-  rofi_titles=$(echo -e "$search_results" | sed 's/ ➔ .*//')
-  total_items=$(echo -e "$search_results" | wc -l)
+    rofi_titles=$(echo -e "$search_results" | sed 's/ ➔ .*//')
+    total_items=$(echo -e "$search_results" | wc -l)
 
-  if [ "$total_items" -ge "$search_limit" ]; then
-    rofi_menu_data="${rofi_titles}\n🔍 Show more results..."
-  else
-    rofi_menu_data="$rofi_titles"
-  fi
+    if [ "$total_items" -ge "$search_limit" ]; then
+      rofi_menu_data="${rofi_titles}\n🔍 Show more results..."
+    else
+      rofi_menu_data="$rofi_titles"
+    fi
 
-  selected_index=$(echo -e "$rofi_menu_data" | "${ROFI_NAV[@]}" -format i -p "Select Item" -theme-str 'entry { placeholder: "Select track, playlist, or channel..."; }')
-  if [ $? -eq 10 ] || [ -z "$selected_index" ]; then
-    return
-  fi
+    selected_index=$(echo -e "$rofi_menu_data" | "${ROFI_NAV[@]}" -format i -p "Select Item" -theme-str 'entry { placeholder: "Select track, playlist, or channel..."; }')
+    if [ $? -eq 10 ] || [ -z "$selected_index" ]; then
+      return
+    fi
 
-  if [ "$selected_index" -eq "$total_items" ]; then
-    search_limit=$((search_limit + 30))
-    continue
-  fi
+    if [ "$selected_index" -eq "$total_items" ]; then
+      search_limit=$((search_limit + 30))
+      continue
+    fi
 
-  matched_line=$(echo -e "$search_results" | sed -n "$((selected_index + 1))p")
-  url=$(echo "$matched_line" | sed 's/.* ➔ //')
-  title_extracted=$(echo "$matched_line" | sed 's/ ➔ .*//')
-  break
-done
+    matched_line=$(echo -e "$search_results" | sed -n "$((selected_index + 1))p")
+    url=$(echo "$matched_line" | sed 's/.* ➔ //')
+    title_extracted=$(echo "$matched_line" | sed 's/ ➔ .*//')
+    break
+  done
+fi
 
 # ==============================================================================
 # PHASE 3: UNIFIED ROUTER & BACK-TRACKING ENGINE
