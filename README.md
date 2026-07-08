@@ -31,7 +31,6 @@ Best for Arch Linux environments with custom terminal configurations.
 
 ## Clone & Setup:
 
-    ```bash
     git clone [https://github.com/yourusername/rofi-youtube-client.git](https://github.com/yourusername/rofi-youtube-client.git)
     cd rofi-youtube-client
     chmod +x install.sh
@@ -39,7 +38,6 @@ Best for Arch Linux environments with custom terminal configurations.
 
 ## Configure Authentication: Export your browser session tokens.
     
-    ```bash
     # Place your exported YouTube cookies here:
     ~/.config/yt-dlp/youtube-cookies.txt
 
