@@ -1,5 +1,7 @@
 # Rofi YouTube Client
 
+https://github.com/user-attachments/assets/6231e20c-d633-4123-ab68-c7c05f1face3
+
 A lightweight, terminal-centric media workflow designed for Arch Linux. It combines Rofi, mpv, and yt-dlp to provide a seamless asynchronous streaming, active playback tracking, and automated profile logging experience.
 
 ## Features
@@ -11,6 +13,11 @@ A lightweight, terminal-centric media workflow designed for Arch Linux. It combi
   * **Media Engine:** mpv (Hardware-accelerated playback)
   * **Backend:** yt-dlp (Stream resolution and authentication)
   * **IPC Gateway:** socat (Space-agnostic JSON-IPC active session parsing)
+ 
+ ## Notice
+
+- Use of yt-dlp can result in ban of account in certain cases, please proceed with a throwaway account if possible.
+- Play next(Queue) option is bugged and currently does not work.
 
 ## Documentation
 
@@ -60,3 +67,8 @@ To prevent YouTube from triggering anti-bot verification challenges and to also 
 ## AUR Package
 
 (Coming Soon)
+
+## Troubleshooting
+
+- If you are being blocked, then it is most likely because of expired cookies (cookies from incognito tabs last longer)
+- If Automix is not pulling up a long playlist then that is also most likely because of expired cookies
